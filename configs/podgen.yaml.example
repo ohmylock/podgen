@@ -1,0 +1,11 @@
+podcasts:
+  demo:
+    title: "demo podcast"
+    folder: "demo"
+cloud_storage:
+  endpoint_url: "https://YOU_SHOULD_SET_YOUR_S3_URL"
+  bucket: "YOU_SHOULD_SET_YOUR_S3_BUCKET_NAME"
+  region: "YOU_SHOULD_SET_YOUR_S3_REGION"
+  secrets:
+    aws_key: "YOU_SHOULD_SET_YOUR_AWS_KEY"
+    aws_secret: "YOU_SHOULD_SET_YOUR_AWS_SECRET"
