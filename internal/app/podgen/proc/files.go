@@ -12,15 +12,6 @@ import (
 type Files struct {
 }
 
-func (f *Files) scanFolder(folderName string) ([]os.DirEntry, error) {
-	dir, err := os.ReadDir(fmt.Sprintf("storage/%s", folderName))
-	if err != nil {
-		return nil, err
-	}
-
-	return dir, nil
-}
-
 func (f *Files) FindEpisodes(folderName string) ([]podcast.Episode, error) {
 	var result []podcast.Episode
 
@@ -41,8 +32,17 @@ func (f *Files) FindEpisodes(folderName string) ([]podcast.Episode, error) {
 			return nil, err
 		}
 
-		result = append(result, podcast.Episode{Filename: entity.Name(), Size: entityInfo.Size()})
+		result = append(result, podcast.Episode{Filename: entity.Name(), Size: entityInfo.Size(), Status: podcast.New})
 	}
 
 	return result, nil
+}
+
+func (f *Files) scanFolder(folderName string) ([]os.DirEntry, error) {
+	dir, err := os.ReadDir(fmt.Sprintf("storage/%s", folderName))
+	if err != nil {
+		return nil, err
+	}
+
+	return dir, nil
 }

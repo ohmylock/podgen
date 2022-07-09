@@ -89,4 +89,8 @@ func main() {
 	if opts.Scan {
 		app.Update()
 	}
+
+	if opts.Upload {
+		app.Upload()
+	}
 }
