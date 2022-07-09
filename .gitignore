@@ -1,0 +1,14 @@
+# phpstorm project files
+.idea
+/*.iml
+
+# Mac DS_Store Files
+.DS_Store
+
+/configs/*.yaml
+
+/storage/*
+!/storage/.gitkeep
+
+/var/*
+!/var/.gitkeep
