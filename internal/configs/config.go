@@ -22,8 +22,9 @@ type Conf struct {
 
 // Podcast defines podcast section
 type Podcast struct {
-	Title  string `yaml:"title"`
-	Folder string `yaml:"folder"`
+	Title   string `yaml:"title"`
+	Folder  string `yaml:"folder"`
+	MaxSize int64  `yaml:"max_size"`
 }
 
 // Load config from file

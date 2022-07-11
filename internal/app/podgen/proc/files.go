@@ -12,8 +12,8 @@ import (
 type Files struct {
 }
 
-func (f *Files) FindEpisodes(folderName string) ([]podcast.Episode, error) {
-	var result []podcast.Episode
+func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
+	var result []*podcast.Episode
 
 	entities, err := f.scanFolder(folderName)
 	if err != nil {
@@ -32,7 +32,7 @@ func (f *Files) FindEpisodes(folderName string) ([]podcast.Episode, error) {
 			return nil, err
 		}
 
-		result = append(result, podcast.Episode{Filename: entity.Name(), Size: entityInfo.Size(), Status: podcast.New})
+		result = append(result, &podcast.Episode{Filename: entity.Name(), Size: entityInfo.Size(), Status: podcast.New})
 	}
 
 	return result, nil
