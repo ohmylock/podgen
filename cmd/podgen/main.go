@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path"
-	"time"
 
-	"github.com/boltdb/bolt"
 	"github.com/jessevdk/go-flags"
 	"podgen/internal/app/podgen"
 	"podgen/internal/app/podgen/proc"
@@ -22,22 +19,6 @@ var opts struct {
 	Scan   bool   `short:"s" long:"scan" description:"Find and add new episodes"`
 
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
-}
-
-func NewBoltDB(dbFile string) (*bolt.DB, error) {
-	log.Printf("[INFO] bolt (persistent) store, %s", dbFile)
-	if dbFile == "" {
-		return nil, fmt.Errorf("empty db")
-	}
-	if err := os.MkdirAll(path.Dir(dbFile), 0o700); err != nil {
-		return nil, err
-	}
-	db, err := bolt.Open(dbFile, 0o600, &bolt.Options{Timeout: 1 * time.Second}) // nolint
-	if err != nil {
-		return nil, err
-	}
-
-	return db, err
 }
 
 func checkFileExists(filepath string) bool {
@@ -69,17 +50,27 @@ func main() {
 		}
 	}
 
-	db, err := NewBoltDB(opts.DB)
-	if err != nil {
-		log.Fatalf("[ERROR] can't load config %s, %v", opts.Conf, err)
-	}
-
 	conf, err := configs.Load(configFile)
 	if err != nil {
 		log.Fatalf("[ERROR] can't load config %s, %v", opts.Conf, err)
 	}
 
-	procEntity := &proc.Processor{Storage: &proc.BoltDB{DB: db}}
+	db, err := podgen.NewBoltDB(opts.DB)
+	if err != nil {
+		log.Fatalf("[ERROR] can't create boltdb instance, %v", err)
+	}
+
+	s3client, err := podgen.NewS3Client(
+		conf.CloudStorage.EndPointURL,
+		conf.CloudStorage.Secrets.Key,
+		conf.CloudStorage.Secrets.Secret,
+		true)
+	if err != nil {
+		log.Fatalf("[ERROR] can't create s3client instance, %v", err)
+	}
+
+	procEntity := &proc.Processor{Storage: &proc.BoltDB{DB: db},
+		S3Client: &proc.S3Store{Client: s3client, Location: conf.CloudStorage.Region, Bucket: conf.CloudStorage.Bucket}}
 
 	app, err := podgen.NewApplication(conf, procEntity)
 	if err != nil {
