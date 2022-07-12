@@ -1,7 +1,6 @@
 package proc
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 
@@ -16,22 +15,17 @@ type BoltDB struct {
 }
 
 // SaveEpisode save episodes to podcast bucket in bolt db
-func (b *BoltDB) SaveEpisode(podcastID string, episode *podcast.Episode) (bool, error) {
-	var created bool
+func (b *BoltDB) SaveEpisode(podcastID string, episode *podcast.Episode) error {
 	key, err := b.getEpisodeKey(episode)
 
 	if err != nil {
-		return created, err
+		return err
 	}
 
 	err = b.DB.Update(func(tx *bolt.Tx) error {
 		bucket, e := tx.CreateBucketIfNotExists([]byte(podcastID))
 		if e != nil {
 			return e
-		}
-
-		if bucket.Get(key) != nil {
-			return nil
 		}
 
 		jdata, jerr := json.Marshal(episode)
@@ -45,16 +39,15 @@ func (b *BoltDB) SaveEpisode(podcastID string, episode *podcast.Episode) (bool, 
 			return e
 		}
 
-		created = true
 		return e
 	})
 
-	return created, err
+	return err
 }
 
 // FindEpisodesByStatus get episodes from store by status
-func (b *BoltDB) FindEpisodesByStatus(podcastID string, filterStatus podcast.Status) ([]podcast.Episode, error) {
-	var result []podcast.Episode
+func (b *BoltDB) FindEpisodesByStatus(podcastID string, filterStatus podcast.Status) ([]*podcast.Episode, error) {
+	var result []*podcast.Episode
 	err := b.DB.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(podcastID))
 		if bucket == nil {
@@ -62,7 +55,7 @@ func (b *BoltDB) FindEpisodesByStatus(podcastID string, filterStatus podcast.Sta
 		}
 
 		c := bucket.Cursor()
-		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+		for k, v := c.First(); k != nil; k, v = c.Next() {
 			item := podcast.Episode{}
 			if err := json.Unmarshal(v, &item); err != nil {
 				log.Printf("[WARN] failed to unmarshal, %v", err)
@@ -71,7 +64,7 @@ func (b *BoltDB) FindEpisodesByStatus(podcastID string, filterStatus podcast.Sta
 			if item.Status != filterStatus {
 				continue
 			}
-			result = append(result, item)
+			result = append(result, &item)
 		}
 		return nil
 	})
@@ -84,7 +77,7 @@ func (b *BoltDB) ChangeStatusEpisodes(podcastID string, fromStatus, toStatus pod
 	err := b.DB.Batch(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(podcastID))
 		if bucket == nil {
-			return fmt.Errorf("no bucket for %s", podcastID)
+			log.Fatalf("no bucket for %s", podcastID)
 		}
 
 		c := bucket.Cursor()
@@ -118,30 +111,30 @@ func (b *BoltDB) ChangeStatusEpisodes(podcastID string, fromStatus, toStatus pod
 // ChangeEpisodeStatus change status of episodes in store
 func (b *BoltDB) ChangeEpisodeStatus(podcastID string, episode *podcast.Episode, status podcast.Status) error {
 	episode.Status = status
-	_, err := b.SaveEpisode(podcastID, episode)
-	return err
+	return b.SaveEpisode(podcastID, episode)
 }
 
-func (b *BoltDB) FindEpisodesBySize(podcastID string, status podcast.Status, maxSize int64) ([]podcast.Episode, error) {
+// FindEpisodesBySizeLimit get list of episodes with total size limit
+func (b *BoltDB) FindEpisodesBySizeLimit(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
 	episodes, err := b.FindEpisodesByStatus(podcastID, status)
 	if err != nil {
 		log.Printf("[INFO] No episodes in podcast %s", podcastID)
 		return nil, nil
 	}
-
 	var sizes int64
-	var result []podcast.Episode
-	for _, episode := range episodes {
-		if sizes >= maxSize || (sizes+episode.Size) >= maxSize {
-			return result, nil
+	var result = make([]*podcast.Episode, len(episodes))
+	for i, episode := range episodes {
+		if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) >= sizeLimit) {
+			return result[:i], nil
 		}
 		sizes += episode.Size
-		result = append(result, episode)
+		result[i] = episode
 	}
 
 	return result, nil
 }
 
+// GetEpisodeByFilename get episode by filename from store
 func (b *BoltDB) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episode, error) {
 	key, err := b.getEpisodeKeyByFilename(fileName)
 	if err != nil {
@@ -152,7 +145,8 @@ func (b *BoltDB) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Epis
 	err = b.DB.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(podcastID))
 		if bucket == nil {
-			log.Fatalf("no bucket for %s", podcastID)
+			log.Printf("[WARN] no bucket for %s", podcastID)
+			return fmt.Errorf("no bucket for %s", podcastID)
 		}
 
 		item := bucket.Get(key)
@@ -171,6 +165,9 @@ func (b *BoltDB) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Epis
 	if err != nil {
 		return nil, err
 	}
+	if episode.Filename == "" {
+		return nil, nil
+	}
 
 	return episode, nil
 }
@@ -180,13 +177,5 @@ func (b *BoltDB) getEpisodeKey(episode *podcast.Episode) ([]byte, error) {
 }
 
 func (b *BoltDB) getEpisodeKeyByFilename(filename string) ([]byte, error) {
-	key, err := func() ([]byte, error) {
-		h := sha256.New()
-		if _, err := h.Write([]byte(filename)); err != nil {
-			return nil, err
-		}
-		return []byte(fmt.Sprintf("%x", h.Sum(nil))), nil
-	}()
-
-	return key, err
+	return []byte(filename), nil
 }
