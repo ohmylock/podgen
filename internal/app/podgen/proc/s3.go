@@ -14,6 +14,7 @@ type S3Store struct {
 	Bucket   string
 }
 
+// UploadEpisode to s3 storage
 func (s *S3Store) UploadEpisode(ctx context.Context, objectName, filePath string) (*minio.UploadInfo, error) {
 	exists, errBucketExists := s.Client.BucketExists(ctx, s.Bucket)
 	if errBucketExists != nil {
@@ -31,4 +32,20 @@ func (s *S3Store) UploadEpisode(ctx context.Context, objectName, filePath string
 		return nil, err
 	}
 	return &uploadInfo, nil
+}
+
+// DeleteEpisode from s3 storage
+func (s *S3Store) DeleteEpisode(ctx context.Context, objectName string) error {
+	exists, errBucketExists := s.Client.BucketExists(ctx, s.Bucket)
+	if errBucketExists != nil {
+		log.Fatalf("[ERROR] can't check exists bucket %s, %v", s.Bucket, errBucketExists)
+	}
+	if !exists {
+		return nil
+	}
+	err := s.Client.RemoveObject(ctx, s.Bucket, objectName, minio.RemoveObjectOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
 }

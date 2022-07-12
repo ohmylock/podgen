@@ -15,7 +15,7 @@ import (
 var opts struct {
 	Conf   string `short:"c" long:"conf" env:"PODGEN_CONF" default:"podgen.yml" description:"config file (yml)"`
 	DB     string `short:"d" long:"db" env:"PODGEN_DB" default:"var/podgen.bdb" description:"bolt db file"`
-	Upload bool   `short:"u" long:"upload" description:"Upload episodes"`
+	Upload string `short:"u" long:"upload" description:"Upload episodes by podcast name (separator quota)"`
 	Scan   bool   `short:"s" long:"scan" description:"Find and add new episodes"`
 
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
@@ -81,7 +81,8 @@ func main() {
 		app.Update()
 	}
 
-	if opts.Upload {
-		app.Upload()
+	if opts.Upload != "" {
+		app.DeleteOldEpisodes(opts.Upload)
+		app.Upload(opts.Upload)
 	}
 }

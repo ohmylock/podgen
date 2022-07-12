@@ -16,7 +16,15 @@ type Processor struct {
 	S3Client *S3Store
 }
 
-type UploadEpisode struct {
+// UploadedEpisode struct for result of upload
+type UploadedEpisode struct {
+	PodcastID string
+	Filename  string
+	Location  string
+}
+
+// DeletedEpisode struct for result of delete
+type DeletedEpisode struct {
 	PodcastID string
 	Filename  string
 }
@@ -31,45 +39,95 @@ func (p *Processor) Update(folderName, podcastID string) (int64, error) {
 	}
 
 	for _, episode := range episodes {
-		created, e := p.Storage.SaveEpisode(podcastID, episode)
+		item, err := p.Storage.GetEpisodeByFilename(podcastID, episode.Filename)
+		if err != nil {
+			log.Printf("get episode by filename error, %v", err)
+		}
+
+		if item != nil {
+			continue
+		}
+
+		e := p.Storage.SaveEpisode(podcastID, episode)
 		if e != nil {
 			log.Fatalf("[ERROR] can't add episode %s to %s, %v", episode.Filename, podcastID, e)
 		}
-		if created {
-			countNew++
-		}
-
+		countNew++
 	}
 
 	return countNew, nil
 }
 
-func (p *Processor) DeleteOldEpisodes(podcastID string) (bool, error) {
-	p.Storage.FindEpisodesByStatus(podcastID, podcast.New)
-
-	// err = p.Storage.ChangeStatusEpisodes(podcastID, podcast.New, podcast.Deleted)
-	// if err != nil {
-	// 	if err != nil {
-	// 		log.Fatalf("[ERROR] can't find uploaded episodes from %s, %v", podcastID, err)
-	// 	}
-	// }
-	//
-	return false, nil
-}
-
-func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, maxSize int64) {
-	episodes, err := p.Storage.FindEpisodesBySize(podcastID, podcast.New, maxSize)
+// DeleteOldEpisodesByPodcast from s3 storage
+func (p *Processor) DeleteOldEpisodesByPodcast(podcastID, podcastFolder string) error {
+	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
 	if err != nil {
 		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
 	}
-
-	uploadCh := make(chan UploadEpisode)
+	deleteCh := make(chan DeletedEpisode)
+	done := make(chan bool)
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
 	for _, episode := range episodes {
 		wg.Add(1)
 
-		go func(uploadCh chan UploadEpisode, podcastID string, episodeItem podcast.Episode) {
+		go func(deleteCh chan DeletedEpisode, podcastID string, episodeItem *podcast.Episode) {
+			log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
+			err := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
+			if err != nil {
+				log.Printf("[ERROR] can't delete episode %s, %v", episodeItem.Filename, err)
+				wg.Done()
+				return
+			}
+
+			log.Printf("[INFO] Episode deleted %s - %s", episodeItem.Filename, podcastID)
+			deleteCh <- DeletedEpisode{PodcastID: podcastID, Filename: episodeItem.Filename}
+			wg.Done()
+		}(deleteCh, podcastID, episode)
+	}
+
+	go func() {
+		wg.Wait()
+		done <- true
+	}()
+
+Loop:
+	for {
+		select {
+		case deletedEpisode := <-deleteCh:
+			log.Printf("%+v", deletedEpisode)
+			episode, err := p.Storage.GetEpisodeByFilename(deletedEpisode.PodcastID, deletedEpisode.Filename)
+			if err != nil {
+				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", deletedEpisode.PodcastID, deletedEpisode.Filename, err)
+			}
+			episode.Status = podcast.Deleted
+			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
+				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+			}
+			log.Printf("[INFO] episode saved %+v", episode)
+		case <-done:
+			close(deleteCh)
+			break Loop
+		}
+	}
+	return nil
+}
+
+// UploadNewEpisodes get new episodes by total limit of size and upload to s3 storage
+func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit int64) {
+	episodes, err := p.Storage.FindEpisodesBySizeLimit(podcastID, podcast.New, sizeLimit)
+	if err != nil {
+		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
+	}
+
+	uploadCh := make(chan UploadedEpisode)
+	done := make(chan bool)
+	wg := sync.WaitGroup{}
+	ctx := context.Background()
+	for _, episode := range episodes {
+		wg.Add(1)
+
+		go func(uploadCh chan UploadedEpisode, podcastID string, episodeItem *podcast.Episode) {
 			log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
 			uploadInfo, err := p.S3Client.UploadEpisode(ctx,
 				fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
@@ -81,24 +139,33 @@ func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, maxSize i
 			}
 
 			log.Printf("[INFO] Episode uploaded %s - %s", episodeItem.Filename, uploadInfo.Location)
-			uploadCh <- UploadEpisode{PodcastID: podcastID, Filename: episodeItem.Filename}
+			uploadCh <- UploadedEpisode{PodcastID: podcastID, Filename: episodeItem.Filename, Location: uploadInfo.Location}
 			wg.Done()
 		}(uploadCh, podcastID, episode)
 	}
 
 	go func() {
 		wg.Wait()
-		close(uploadCh)
+		done <- true
 	}()
-
-	for uploadedEpisode := range uploadCh {
-		episode, err := p.Storage.GetEpisodeByFilename(uploadedEpisode.PodcastID, uploadedEpisode.Filename)
-		if err != nil {
-			log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
-		}
-
-		if err = p.Storage.ChangeEpisodeStatus(podcastID, episode, podcast.Uploaded); err != nil {
-			log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+Loop:
+	for {
+		select {
+		case uploadedEpisode := <-uploadCh:
+			log.Printf("%+v", uploadedEpisode)
+			episode, err := p.Storage.GetEpisodeByFilename(uploadedEpisode.PodcastID, uploadedEpisode.Filename)
+			if err != nil {
+				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
+			}
+			episode.Status = podcast.Uploaded
+			episode.Location = uploadedEpisode.Location
+			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
+				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+			}
+			log.Printf("[INFO] episode saved %+v", episode)
+		case <-done:
+			close(uploadCh)
+			break Loop
 		}
 	}
 

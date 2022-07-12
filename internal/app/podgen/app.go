@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"podgen/internal/configs"
 )
 
+// App structure application
 type App struct {
 	config    *configs.Conf
 	processor *proc.Processor
@@ -72,30 +74,62 @@ func (a *App) Update() {
 			if countNew > 0 {
 				log.Printf("[INFO] found new %d episodes for %s", countNew, p.Title)
 			}
-
 			wg.Done()
 		}(i, p)
 	}
 	wg.Wait()
 }
 
-func (a *App) Upload() {
+// Upload episodes by podcasts
+func (a *App) Upload(podcastIDs string) {
 	podcasts := a.findPodcasts()
 
+	var foundedPodcasts = make(map[string]configs.Podcast, len(podcasts))
+	splitPodcastIDs := strings.Split(podcastIDs, ",")
+	for podcastID, p := range podcasts {
+		for _, rawPodcastID := range splitPodcastIDs {
+			if podcastID != rawPodcastID {
+				continue
+			}
+			foundedPodcasts[podcastID] = p
+		}
+	}
+
 	wg := sync.WaitGroup{}
-	for i, p := range podcasts {
+	for i, p := range foundedPodcasts {
 		wg.Add(1)
 		go func(i string, p configs.Podcast) {
 			a.processor.UploadNewEpisodes(i, p.Folder, p.MaxSize)
-			// a.deleteOldEpisodes(p)
-			// if err != nil {
 			wg.Done()
-			// 	return
-			// }
-			// if countNew > 0 {
-			// 	log.Printf("[INFO] found new %d episodes for %s", countNew, p.Title)
-			// }
-			//
+		}(i, p)
+	}
+	wg.Wait()
+}
+
+// DeleteOldEpisodes delete old episodes by podcasts
+func (a *App) DeleteOldEpisodes(podcastIDs string) {
+	podcasts := a.findPodcasts()
+
+	var foundedPodcasts = make(map[string]configs.Podcast, len(podcasts))
+	splitPodcastIDs := strings.Split(podcastIDs, ",")
+	for podcastID, p := range podcasts {
+		for _, rawPodcastID := range splitPodcastIDs {
+			if podcastID != rawPodcastID {
+				continue
+			}
+			foundedPodcasts[podcastID] = p
+		}
+	}
+
+	wg := sync.WaitGroup{}
+	for i, p := range foundedPodcasts {
+		wg.Add(1)
+		go func(i string, p configs.Podcast) {
+			err := a.processor.DeleteOldEpisodesByPodcast(i, p.Folder)
+			if err != nil {
+				log.Fatalf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
+			}
+			wg.Done()
 		}(i, p)
 	}
 	wg.Wait()
@@ -114,6 +148,6 @@ func (a *App) updateFolder(folderName, podcastID string) (int64, error) {
 	return countNew, nil
 }
 
-func (a *App) deleteOldEpisodes(p configs.Podcast) {
-	a.processor.DeleteOldEpisodes(p.Folder)
-}
+// func (a *App) deleteOldEpisodes(p configs.Podcast) {
+// 	a.processor.DeleteOldEpisodes(p.Folder)
+// }

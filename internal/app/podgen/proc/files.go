@@ -3,6 +3,7 @@ package proc
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	log "github.com/go-pkgz/lgr"
 	"podgen/internal/app/podgen/podcast"
@@ -12,16 +13,15 @@ import (
 type Files struct {
 }
 
+// FindEpisodes in folder and come back like slice
 func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
-	var result []*podcast.Episode
-
 	entities, err := f.scanFolder(folderName)
 	if err != nil {
 		log.Fatalf("[ERROR] can't scan folder %s, %v", folderName, err)
 		return nil, err
 	}
-
-	for _, entity := range entities {
+	var result = make([]*podcast.Episode, len(entities))
+	for i, entity := range entities {
 		if entity.IsDir() {
 			continue
 		}
@@ -32,8 +32,12 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 			return nil, err
 		}
 
-		result = append(result, &podcast.Episode{Filename: entity.Name(), Size: entityInfo.Size(), Status: podcast.New})
+		result[i] = &podcast.Episode{Filename: entity.Name(), Size: entityInfo.Size(), Status: podcast.New}
 	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		return result[i].Filename < result[j].Filename
+	})
 
 	return result, nil
 }
