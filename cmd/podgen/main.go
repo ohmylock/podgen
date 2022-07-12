@@ -83,6 +83,8 @@ func main() {
 
 	if opts.Upload != "" {
 		app.DeleteOldEpisodes(opts.Upload)
-		app.Upload(opts.Upload)
+		app.UploadEpisodes(opts.Upload)
+		app.GenerateFeed(opts.Upload)
+
 	}
 }

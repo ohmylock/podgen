@@ -80,23 +80,12 @@ func (a *App) Update() {
 	wg.Wait()
 }
 
-// Upload episodes by podcasts
-func (a *App) Upload(podcastIDs string) {
-	podcasts := a.findPodcasts()
-
-	var foundedPodcasts = make(map[string]configs.Podcast, len(podcasts))
-	splitPodcastIDs := strings.Split(podcastIDs, ",")
-	for podcastID, p := range podcasts {
-		for _, rawPodcastID := range splitPodcastIDs {
-			if podcastID != rawPodcastID {
-				continue
-			}
-			foundedPodcasts[podcastID] = p
-		}
-	}
+// UploadEpisodes by podcasts to s3 storage
+func (a *App) UploadEpisodes(podcastIDs string) {
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	wg := sync.WaitGroup{}
-	for i, p := range foundedPodcasts {
+	for i, p := range podcasts {
 		wg.Add(1)
 		go func(i string, p configs.Podcast) {
 			a.processor.UploadNewEpisodes(i, p.Folder, p.MaxSize)
@@ -108,27 +97,36 @@ func (a *App) Upload(podcastIDs string) {
 
 // DeleteOldEpisodes delete old episodes by podcasts
 func (a *App) DeleteOldEpisodes(podcastIDs string) {
-	podcasts := a.findPodcasts()
-
-	var foundedPodcasts = make(map[string]configs.Podcast, len(podcasts))
-	splitPodcastIDs := strings.Split(podcastIDs, ",")
-	for podcastID, p := range podcasts {
-		for _, rawPodcastID := range splitPodcastIDs {
-			if podcastID != rawPodcastID {
-				continue
-			}
-			foundedPodcasts[podcastID] = p
-		}
-	}
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	wg := sync.WaitGroup{}
-	for i, p := range foundedPodcasts {
+	for i, p := range podcasts {
 		wg.Add(1)
 		go func(i string, p configs.Podcast) {
 			err := a.processor.DeleteOldEpisodesByPodcast(i, p.Folder)
 			if err != nil {
 				log.Fatalf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
 			}
+			wg.Done()
+		}(i, p)
+	}
+	wg.Wait()
+}
+
+// GenerateFeed for podcasts
+func (a *App) GenerateFeed(podcastIDs string) {
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+
+	wg := sync.WaitGroup{}
+	for i, p := range podcasts {
+		wg.Add(1)
+		go func(i string, p configs.Podcast) {
+			feedFilename, err := a.processor.GenerateFeed(i, p.Title, p.Folder)
+			if err != nil {
+				log.Fatalf("%s", err)
+			}
+			uploadInfo := a.processor.UploadFeed(p.Folder, feedFilename)
+			log.Printf("Feed url %s", uploadInfo.Location)
 			wg.Done()
 		}(i, p)
 	}
@@ -148,6 +146,18 @@ func (a *App) updateFolder(folderName, podcastID string) (int64, error) {
 	return countNew, nil
 }
 
-// func (a *App) deleteOldEpisodes(p configs.Podcast) {
-// 	a.processor.DeleteOldEpisodes(p.Folder)
-// }
+func (a *App) filterPodcastsByPodcastIDs(podcastIDs string) map[string]configs.Podcast {
+	podcasts := a.findPodcasts()
+	var result = make(map[string]configs.Podcast, len(podcasts))
+	splitPodcastIDs := strings.Split(podcastIDs, ",")
+	for podcastID, p := range podcasts {
+		for _, rawPodcastID := range splitPodcastIDs {
+			if podcastID != rawPodcastID {
+				continue
+			}
+			result[podcastID] = p
+		}
+	}
+
+	return result
+}
