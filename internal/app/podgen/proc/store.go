@@ -33,7 +33,7 @@ func (b *BoltDB) SaveEpisode(podcastID string, episode *podcast.Episode) error {
 			return jerr
 		}
 
-		log.Printf("[INFO] save episode %s - %s - %s - %d", string(key), podcastID, episode.Filename, episode.Size)
+		log.Printf("[INFO] save episode %s - %s", podcastID, episode.Filename)
 		e = bucket.Put(key, jdata)
 		if e != nil {
 			return e

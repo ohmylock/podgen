@@ -3,6 +3,7 @@ package proc
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	log "github.com/go-pkgz/lgr"
@@ -11,6 +12,7 @@ import (
 
 // Files for work with files of episodes
 type Files struct {
+	Storage string
 }
 
 // FindEpisodes in folder and come back like slice
@@ -25,6 +27,10 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 		if entity.IsDir() {
 			continue
 		}
+		extension := filepath.Ext(entity.Name())
+		if extension != ".mp3" {
+			continue
+		}
 
 		entityInfo, err := entity.Info()
 		if err != nil {
@@ -36,6 +42,9 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 	}
 
 	sort.SliceStable(result, func(i, j int) bool {
+		if result[i] == nil || result[j] == nil {
+			return false
+		}
 		return result[i].Filename < result[j].Filename
 	})
 
@@ -43,7 +52,7 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 }
 
 func (f *Files) scanFolder(folderName string) ([]os.DirEntry, error) {
-	dir, err := os.ReadDir(fmt.Sprintf("storage/%s", folderName))
+	dir, err := os.ReadDir(fmt.Sprintf("%s/%s", f.Storage, folderName))
 	if err != nil {
 		return nil, err
 	}

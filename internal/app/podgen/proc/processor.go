@@ -42,6 +42,9 @@ func (p *Processor) Update(folderName, podcastID string) (int64, error) {
 	}
 
 	for _, episode := range episodes {
+		if episode == nil {
+			continue
+		}
 		item, err := p.Storage.GetEpisodeByFilename(podcastID, episode.Filename)
 		if err != nil {
 			log.Printf("get episode by filename error, %v", err)
@@ -75,17 +78,16 @@ func (p *Processor) DeleteOldEpisodesByPodcast(podcastID, podcastFolder string) 
 		wg.Add(1)
 
 		go func(deleteCh chan DeletedEpisode, podcastID string, episodeItem *podcast.Episode) {
+			defer wg.Done()
 			log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
 			err := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
 			if err != nil {
 				log.Printf("[ERROR] can't delete episode %s, %v", episodeItem.Filename, err)
-				wg.Done()
 				return
 			}
 
 			log.Printf("[INFO] Episode deleted %s - %s", episodeItem.Filename, podcastID)
 			deleteCh <- DeletedEpisode{PodcastID: podcastID, Filename: episodeItem.Filename}
-			wg.Done()
 		}(deleteCh, podcastID, episode)
 	}
 
@@ -98,7 +100,6 @@ Loop:
 	for {
 		select {
 		case deletedEpisode := <-deleteCh:
-			log.Printf("%+v", deletedEpisode)
 			episode, err := p.Storage.GetEpisodeByFilename(deletedEpisode.PodcastID, deletedEpisode.Filename)
 			if err != nil {
 				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", deletedEpisode.PodcastID, deletedEpisode.Filename, err)
@@ -107,7 +108,6 @@ Loop:
 			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
 				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
 			}
-			log.Printf("[INFO] episode saved %+v", episode)
 		case <-done:
 			close(deleteCh)
 			break Loop
@@ -129,22 +129,20 @@ func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit
 	ctx := context.Background()
 	for _, episode := range episodes {
 		wg.Add(1)
-
-		go func(uploadCh chan UploadedEpisode, podcastID string, episodeItem *podcast.Episode) {
+		go func(wg *sync.WaitGroup, uploadCh chan UploadedEpisode, podcastID string, episodeItem *podcast.Episode) {
+			defer wg.Done()
 			log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
 			uploadInfo, err := p.S3Client.UploadEpisode(ctx,
 				fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
-				fmt.Sprintf("storage/%s/%s", podcastFolder, episodeItem.Filename))
+				fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, episodeItem.Filename))
 			if err != nil {
 				log.Printf("[ERROR] can't upload episode %s, %v", episodeItem.Filename, err)
-				wg.Done()
 				return
 			}
-
 			log.Printf("[INFO] Episode uploaded %s - %s", episodeItem.Filename, uploadInfo.Location)
 			uploadCh <- UploadedEpisode{PodcastID: podcastID, Filename: episodeItem.Filename, Location: uploadInfo.Location}
-			wg.Done()
-		}(uploadCh, podcastID, episode)
+
+		}(&wg, uploadCh, podcastID, episode)
 	}
 
 	go func() {
@@ -155,7 +153,6 @@ Loop:
 	for {
 		select {
 		case uploadedEpisode := <-uploadCh:
-			log.Printf("%+v", uploadedEpisode)
 			episode, err := p.Storage.GetEpisodeByFilename(uploadedEpisode.PodcastID, uploadedEpisode.Filename)
 			if err != nil {
 				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
@@ -165,7 +162,6 @@ Loop:
 			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
 				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
 			}
-			log.Printf("[INFO] episode saved %+v", episode)
 		case <-done:
 			close(uploadCh)
 			break Loop
@@ -202,7 +198,7 @@ func (p *Processor) GenerateFeed(podcastID, podcastTitle, podcastFolder string) 
 		log.Fatalf("[ERROR] can't generate feed key for %s, %v", podcastID, err)
 	}
 	feedFilename := fmt.Sprintf("%s.xml", feedKey)
-	feedPath := fmt.Sprintf("storage/%s/%s", podcastFolder, feedFilename)
+	feedPath := fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, feedFilename)
 	f, err := os.Create(feedPath) // nolint
 	if err != nil {
 		log.Fatalf("[ERROR] can't create file %s, %v", feedPath, err)
@@ -213,7 +209,7 @@ func (p *Processor) GenerateFeed(podcastID, podcastTitle, podcastFolder string) 
 		}
 	}(f)
 
-	if _, err = f.WriteString(header + body + footer); err != nil {
+	if _, err = f.WriteString(fmt.Sprintf("%s\n%s\n%s", header, body, footer)); err != nil {
 		return "", fmt.Errorf("[ERROR] can't write to file %s, %v", feedPath, err)
 	}
 
@@ -224,7 +220,7 @@ func (p *Processor) GenerateFeed(podcastID, podcastTitle, podcastFolder string) 
 func (p *Processor) UploadFeed(podcastFolder, feedName string) *minio.UploadInfo {
 	uploadInfo, err := p.S3Client.UploadFeed(context.Background(),
 		fmt.Sprintf("%s/%s", podcastFolder, feedName),
-		fmt.Sprintf("storage/%s/%s", podcastFolder, feedName))
+		fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, feedName))
 
 	if err != nil {
 		log.Printf("[ERROR] can't upload feed %s, %v", feedName, err)
