@@ -66,15 +66,14 @@ func (a *App) Update() {
 	for i, p := range podcasts {
 		wg.Add(1)
 		go func(i string, p configs.Podcast) {
+			defer wg.Done()
 			countNew, err := a.updateFolder(p.Folder, i)
 			if err != nil {
-				wg.Done()
 				return
 			}
 			if countNew > 0 {
 				log.Printf("[INFO] found new %d episodes for %s", countNew, p.Title)
 			}
-			wg.Done()
 		}(i, p)
 	}
 	wg.Wait()
@@ -87,10 +86,10 @@ func (a *App) UploadEpisodes(podcastIDs string) {
 	wg := sync.WaitGroup{}
 	for i, p := range podcasts {
 		wg.Add(1)
-		go func(i string, p configs.Podcast) {
+		go func(wg *sync.WaitGroup, i string, p configs.Podcast) {
+			defer wg.Done()
 			a.processor.UploadNewEpisodes(i, p.Folder, p.MaxSize)
-			wg.Done()
-		}(i, p)
+		}(&wg, i, p)
 	}
 	wg.Wait()
 }
@@ -103,11 +102,11 @@ func (a *App) DeleteOldEpisodes(podcastIDs string) {
 	for i, p := range podcasts {
 		wg.Add(1)
 		go func(i string, p configs.Podcast) {
+			defer wg.Done()
 			err := a.processor.DeleteOldEpisodesByPodcast(i, p.Folder)
 			if err != nil {
 				log.Fatalf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
 			}
-			wg.Done()
 		}(i, p)
 	}
 	wg.Wait()
@@ -121,13 +120,13 @@ func (a *App) GenerateFeed(podcastIDs string) {
 	for i, p := range podcasts {
 		wg.Add(1)
 		go func(i string, p configs.Podcast) {
+			defer wg.Done()
 			feedFilename, err := a.processor.GenerateFeed(i, p.Title, p.Folder)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
 			uploadInfo := a.processor.UploadFeed(p.Folder, feedFilename)
 			log.Printf("Feed url %s", uploadInfo.Location)
-			wg.Done()
 		}(i, p)
 	}
 	wg.Wait()

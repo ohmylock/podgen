@@ -6,9 +6,11 @@
 .DS_Store
 
 /configs/*.yaml
-
 /storage/*
 !/storage/.gitkeep
+
+/bin/*
+!/bin/.gitkeep
 
 /var/*
 !/var/.gitkeep

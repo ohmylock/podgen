@@ -2,6 +2,8 @@ package proc
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	log "github.com/go-pkgz/lgr"
 	"github.com/minio/minio-go/v7"
@@ -56,5 +58,24 @@ func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath, contentT
 	if err != nil {
 		return nil, err
 	}
+
+	if uploadInfo.Location == "" {
+		location, err := s.getLocation(ctx, objectName)
+		if err != nil {
+			log.Fatalf("[ERROR] can't get file location %s in bucket %s, %v", objectName, s.Bucket, err)
+		}
+		uploadInfo.Location = location
+	}
 	return &uploadInfo, nil
+}
+
+func (s *S3Store) getLocation(ctx context.Context, objectName string) (string, error) {
+	endpoint := s.Client.EndpointURL()
+
+	statInfo, err := s.Client.StatObject(ctx, s.Bucket, objectName, minio.StatObjectOptions{})
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%s/%s/%s", strings.TrimRight(endpoint.String(), "/"), s.Bucket, statInfo.Key), nil
 }

@@ -41,18 +41,21 @@ func main() {
 	}
 
 	configFile := opts.Conf
-
 	if !checkFileExists(configFile) {
 		configFile = "configs/podgen.yaml"
+	}
 
-		if !checkFileExists(configFile) {
-			log.Fatal("[ERROR] config file not found")
-		}
+	if !checkFileExists(configFile) {
+		log.Fatal("[ERROR] config file not found")
 	}
 
 	conf, err := configs.Load(configFile)
 	if err != nil {
 		log.Fatalf("[ERROR] can't load config %s, %v", opts.Conf, err)
+	}
+
+	if !checkFileExists(conf.Storage.Folder) {
+		log.Fatal("[ERROR] storage folder not found")
 	}
 
 	db, err := podgen.NewBoltDB(opts.DB)
@@ -70,7 +73,9 @@ func main() {
 	}
 
 	procEntity := &proc.Processor{Storage: &proc.BoltDB{DB: db},
-		S3Client: &proc.S3Store{Client: s3client, Location: conf.CloudStorage.Region, Bucket: conf.CloudStorage.Bucket}}
+		S3Client: &proc.S3Store{Client: s3client, Location: conf.CloudStorage.Region, Bucket: conf.CloudStorage.Bucket},
+		Files:    &proc.Files{Storage: conf.Storage.Folder},
+	}
 
 	app, err := podgen.NewApplication(conf, procEntity)
 	if err != nil {
@@ -85,6 +90,5 @@ func main() {
 		app.DeleteOldEpisodes(opts.Upload)
 		app.UploadEpisodes(opts.Upload)
 		app.GenerateFeed(opts.Upload)
-
 	}
 }
