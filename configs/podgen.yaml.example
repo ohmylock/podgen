@@ -3,8 +3,13 @@ podcasts:
     title: "demo podcast"
     folder: "demo"
     max_size: 10000000
+
+upload:
+  chunk_size: 3
+
 storage:
   folder: "storage"
+
 cloud_storage:
   endpoint_url: "https://YOU_SHOULD_SET_YOUR_S3_URL"
   bucket: "YOU_SHOULD_SET_YOUR_S3_BUCKET_NAME"

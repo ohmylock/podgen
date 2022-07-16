@@ -73,8 +73,9 @@ func main() {
 	}
 
 	procEntity := &proc.Processor{Storage: &proc.BoltDB{DB: db},
-		S3Client: &proc.S3Store{Client: s3client, Location: conf.CloudStorage.Region, Bucket: conf.CloudStorage.Bucket},
-		Files:    &proc.Files{Storage: conf.Storage.Folder},
+		S3Client:  &proc.S3Store{Client: s3client, Location: conf.CloudStorage.Region, Bucket: conf.CloudStorage.Bucket},
+		Files:     &proc.Files{Storage: conf.Storage.Folder},
+		ChunkSize: conf.Upload.ChunkSize,
 	}
 
 	app, err := podgen.NewApplication(conf, procEntity)

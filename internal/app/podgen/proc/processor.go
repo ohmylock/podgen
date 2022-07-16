@@ -14,9 +14,10 @@ import (
 
 // Processor is searcher of episode files and writer to store
 type Processor struct {
-	Storage  *BoltDB
-	Files    *Files
-	S3Client *S3Store
+	Storage   *BoltDB
+	Files     *Files
+	S3Client  *S3Store
+	ChunkSize int
 }
 
 // UploadedEpisode struct for result of upload
@@ -110,6 +111,7 @@ Loop:
 			}
 		case <-done:
 			close(deleteCh)
+			close(done)
 			break Loop
 		}
 	}
@@ -123,48 +125,59 @@ func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit
 		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
 	}
 
-	uploadCh := make(chan UploadedEpisode)
-	done := make(chan bool)
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
-	for _, episode := range episodes {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup, uploadCh chan UploadedEpisode, podcastID string, episodeItem *podcast.Episode) {
-			defer wg.Done()
-			log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
-			uploadInfo, err := p.S3Client.UploadEpisode(ctx,
-				fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
-				fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, episodeItem.Filename))
-			if err != nil {
-				log.Printf("[ERROR] can't upload episode %s, %v", episodeItem.Filename, err)
-				return
-			}
-			log.Printf("[INFO] Episode uploaded %s - %s", episodeItem.Filename, uploadInfo.Location)
-			uploadCh <- UploadedEpisode{PodcastID: podcastID, Filename: episodeItem.Filename, Location: uploadInfo.Location}
 
-		}(&wg, uploadCh, podcastID, episode)
-	}
+	for i := 0; i < len(episodes); i += p.ChunkSize {
+		uploadCh := make(chan UploadedEpisode)
+		done := make(chan bool)
+		end := i + p.ChunkSize
 
-	go func() {
-		wg.Wait()
-		done <- true
-	}()
-Loop:
-	for {
-		select {
-		case uploadedEpisode := <-uploadCh:
-			episode, err := p.Storage.GetEpisodeByFilename(uploadedEpisode.PodcastID, uploadedEpisode.Filename)
-			if err != nil {
-				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
+		if end > len(episodes) {
+			end = len(episodes)
+		}
+
+		for _, episode := range episodes[i:end] {
+			wg.Add(1)
+			go func(wg *sync.WaitGroup, uploadCh chan UploadedEpisode, podcastID string, episodeItem *podcast.Episode) {
+				defer wg.Done()
+				log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
+				uploadInfo, err := p.S3Client.UploadEpisode(ctx,
+					fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
+					fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, episodeItem.Filename))
+				if err != nil {
+					log.Printf("[ERROR] can't upload episode %s, %v", episodeItem.Filename, err)
+					return
+				}
+				log.Printf("[INFO] Episode uploaded %s - %s", episodeItem.Filename, uploadInfo.Location)
+				uploadCh <- UploadedEpisode{PodcastID: podcastID, Filename: episodeItem.Filename, Location: uploadInfo.Location}
+
+			}(&wg, uploadCh, podcastID, episode)
+		}
+
+		go func() {
+			wg.Wait()
+			done <- true
+		}()
+
+	Loop:
+		for {
+			select {
+			case uploadedEpisode := <-uploadCh:
+				episode, err := p.Storage.GetEpisodeByFilename(uploadedEpisode.PodcastID, uploadedEpisode.Filename)
+				if err != nil {
+					log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
+				}
+				episode.Status = podcast.Uploaded
+				episode.Location = uploadedEpisode.Location
+				if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
+					log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+				}
+			case <-done:
+				close(uploadCh)
+				close(done)
+				break Loop
 			}
-			episode.Status = podcast.Uploaded
-			episode.Location = uploadedEpisode.Location
-			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
-				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
-			}
-		case <-done:
-			close(uploadCh)
-			break Loop
 		}
 	}
 
