@@ -18,6 +18,9 @@ type Conf struct {
 			Secret string `yaml:"aws_secret"`
 		} `yaml:"secrets"`
 	} `yaml:"cloud_storage"`
+	Upload struct {
+		ChunkSize int `yaml:"chunk_size"`
+	} `yaml:"upload"`
 	Storage struct {
 		Folder string `yaml:"folder"`
 	} `yaml:"storage"`
