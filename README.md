@@ -17,3 +17,25 @@ Help Options:
   -h, --help    Show this help message
 ```
 
+
+## Configuration
+
+Usually, podgen configuration is stored in `podgen.yml` file. It is a yaml file with the following structure:
+
+```yaml
+podcasts:
+  demopodcast-example: # podcast name, can be repeated for multiple podcasts
+    title: "Demo Podcast" # Podcast title
+    folder: "demo" # Podcast where store episodes
+    max_size: 10000000 # Optional. Max size limit to upload by once
+
+upload:
+  chunk_size: 3 # How meny episodes uploaded on stream
+  
+cloud_storage:
+  endpoint_url: "storage.aws.com" # S3 storage endpoint url
+  bucket: "YOU_SHOULD_SET_YOUR_S3_BUCKET_NAME" # S3 storage bucket
+  region: "YOU_SHOULD_SET_YOUR_S3_REGION" # S3 storage region
+  secrets:
+    aws_key: "YOU_SHOULD_SET_YOUR_AWS_KEY" # S3 storage uploader aws key
+    aws_secret: "YOU_SHOULD_SET_YOUR_AWS_SECRET" # S3 storage uploader aws secret

@@ -11,7 +11,7 @@ storage:
   folder: "storage"
 
 cloud_storage:
-  endpoint_url: "https://YOU_SHOULD_SET_YOUR_S3_URL"
+  endpoint_url: "YOU_SHOULD_SET_YOUR_S3_URL_WITHOUT_HTTP_SCHEME"
   bucket: "YOU_SHOULD_SET_YOUR_S3_BUCKET_NAME"
   region: "YOU_SHOULD_SET_YOUR_S3_REGION"
   secrets:
