@@ -8,7 +8,7 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	conf, err := Load("testdata/config.yaml")
+	conf, err := Load("testdata/config.yml")
 	require.NoError(t, err)
 
 	assert.Equal(t, len(conf.Podcasts), 2)
@@ -21,7 +21,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoadConfigNotFound(t *testing.T) {
-	conf, err := Load("/tmp/test-bestow-nautch-toss-fritter-pygmy-unrest.yaml")
+	conf, err := Load("/tmp/test-bestow-nautch-toss-fritter-pygmy-unrest.yml")
 	assert.Nil(t, conf)
-	assert.EqualError(t, err, "open /tmp/test-bestow-nautch-toss-fritter-pygmy-unrest.yaml: no such file or directory")
+	assert.EqualError(t, err, "open /tmp/test-bestow-nautch-toss-fritter-pygmy-unrest.yml: no such file or directory")
 }
