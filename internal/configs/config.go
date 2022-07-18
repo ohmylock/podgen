@@ -21,6 +21,7 @@ type Conf struct {
 	Upload struct {
 		ChunkSize int `yaml:"chunk_size"`
 	} `yaml:"upload"`
+	DB      string `yaml:"db"`
 	Storage struct {
 		Folder string `yaml:"folder"`
 	} `yaml:"storage"`

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,20 +12,14 @@ import (
 )
 
 var opts struct {
-	Conf   string `short:"c" long:"conf" env:"PODGEN_CONF" default:"podgen.yml" description:"config file (yml)"`
-	DB     string `short:"d" long:"db" env:"PODGEN_DB" default:"var/podgen.bdb" description:"bolt db file"`
-	Upload string `short:"u" long:"upload" description:"Upload episodes by podcast name (separator quota)"`
-	Scan   bool   `short:"s" long:"scan" description:"Find and add new episodes"`
+	Conf        string `short:"c" long:"conf" env:"PODGEN_CONF" default:"podgen.yml" description:"config file (yml)"`
+	DB          string `short:"d" long:"db" env:"PODGEN_DB" description:"bolt db file"`
+	Upload      string `short:"u" long:"upload" description:"Upload episodes by podcast name (separator quota)"`
+	Scan        bool   `short:"s" long:"scan" description:"Find and add new episodes"`
+	UpdateFeed  string `short:"f" long:"feed" description:"Regenerate feeds"`
+	UpdateImage string `short:"i" long:"image" description:"re upload cover of podcasts"`
 
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
-}
-
-func checkFileExists(filepath string) bool {
-	if _, err := os.Stat(filepath); errors.Is(err, os.ErrNotExist) {
-		return false
-	}
-
-	return true
 }
 
 func main() {
@@ -41,11 +34,11 @@ func main() {
 	}
 
 	configFile := opts.Conf
-	if !checkFileExists(configFile) {
-		configFile = "configs/podgen.yaml"
+	if !proc.CheckFileExists(configFile) {
+		configFile = "configs/podgen.yml"
 	}
 
-	if !checkFileExists(configFile) {
+	if !proc.CheckFileExists(configFile) {
 		log.Fatal("[ERROR] config file not found")
 	}
 
@@ -54,11 +47,24 @@ func main() {
 		log.Fatalf("[ERROR] can't load config %s, %v", opts.Conf, err)
 	}
 
-	if !checkFileExists(conf.Storage.Folder) {
+	if !proc.CheckFileExists(conf.Storage.Folder) {
 		log.Fatal("[ERROR] storage folder not found")
 	}
 
-	db, err := podgen.NewBoltDB(opts.DB)
+	dbFilepath := ""
+	if conf.DB != "" {
+		dbFilepath = conf.DB
+	}
+
+	if opts.DB != "" {
+		dbFilepath = opts.DB
+	}
+
+	if dbFilepath == "" {
+		log.Fatal("[ERROR] You don't set bolt db file")
+	}
+
+	db, err := podgen.NewBoltDB(dbFilepath)
 	if err != nil {
 		log.Fatalf("[ERROR] can't create boltdb instance, %v", err)
 	}
@@ -86,10 +92,25 @@ func main() {
 	if opts.Scan {
 		app.Update()
 	}
+	var images map[string]string
+
+	if opts.UpdateImage != "" {
+		images = app.UploadPodcastImage(opts.UpdateImage)
+	}
 
 	if opts.Upload != "" {
 		app.DeleteOldEpisodes(opts.Upload)
 		app.UploadEpisodes(opts.Upload)
-		app.GenerateFeed(opts.Upload)
+
+		if opts.UpdateFeed != "" {
+			opts.UpdateFeed = opts.Upload
+		}
+	}
+
+	if opts.UpdateFeed != "" {
+		if images == nil {
+			images = app.GetPodcastImages(opts.UpdateFeed)
+		}
+		app.GenerateFeed(opts.UpdateFeed, images)
 	}
 }

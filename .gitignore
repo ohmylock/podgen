@@ -5,9 +5,10 @@
 # Mac DS_Store Files
 .DS_Store
 
-/configs/*.yaml
+/configs/*.yml
 /storage/*
 !/storage/.gitkeep
+!/storage/podcast.png
 
 /bin/*
 !/bin/.gitkeep

@@ -16,6 +16,12 @@ type S3Store struct {
 	Bucket   string
 }
 
+// ObjectInfo struct of object in s3 storage
+type ObjectInfo struct {
+	minio.ObjectInfo
+	Location string
+}
+
 // DeleteEpisode from s3 storage
 func (s *S3Store) DeleteEpisode(ctx context.Context, objectName string) error {
 	exists, errBucketExists := s.Client.BucketExists(ctx, s.Bucket)
@@ -37,9 +43,14 @@ func (s *S3Store) UploadEpisode(ctx context.Context, objectName, filePath string
 	return s.uploadFile(ctx, objectName, filePath, "audio/mp3")
 }
 
+// UploadImage to s3 storage
+func (s *S3Store) UploadImage(ctx context.Context, objectName, filePath string) (*minio.UploadInfo, error) {
+	return s.uploadFile(ctx, objectName, filePath, "image/png")
+}
+
 // UploadFeed to s3 storage
 func (s *S3Store) UploadFeed(ctx context.Context, objectName, filePath string) (*minio.UploadInfo, error) {
-	return s.uploadFile(ctx, objectName, filePath, "plain/text")
+	return s.uploadFile(ctx, objectName, filePath, "application/rss+xml")
 }
 
 func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath, contentType string) (*minio.UploadInfo, error) {
@@ -60,22 +71,28 @@ func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath, contentT
 	}
 
 	if uploadInfo.Location == "" {
-		location, err := s.getLocation(ctx, objectName)
+		objectInfo, err := s.GetObjectInfo(ctx, objectName)
 		if err != nil {
 			log.Fatalf("[ERROR] can't get file location %s in bucket %s, %v", objectName, s.Bucket, err)
 		}
-		uploadInfo.Location = location
+		uploadInfo.Location = objectInfo.Location
 	}
 	return &uploadInfo, nil
 }
 
-func (s *S3Store) getLocation(ctx context.Context, objectName string) (string, error) {
-	endpoint := s.Client.EndpointURL()
-
+// GetObjectInfo from object on s3 storage
+func (s *S3Store) GetObjectInfo(ctx context.Context, objectName string) (*ObjectInfo, error) {
 	statInfo, err := s.Client.StatObject(ctx, s.Bucket, objectName, minio.StatObjectOptions{})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return fmt.Sprintf("%s/%s/%s", strings.TrimRight(endpoint.String(), "/"), s.Bucket, statInfo.Key), nil
+	endpoint := s.Client.EndpointURL()
+
+	objectInfo := ObjectInfo{
+		ObjectInfo: statInfo,
+		Location:   fmt.Sprintf("%s/%s/%s", strings.TrimRight(endpoint.String(), "/"), s.Bucket, statInfo.Key),
+	}
+
+	return &objectInfo, nil
 }

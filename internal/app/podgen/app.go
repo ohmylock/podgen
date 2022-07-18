@@ -16,6 +16,8 @@ import (
 	"podgen/internal/configs"
 )
 
+const podcastDefaultImage string = "podcast.png"
+
 // App structure application
 type App struct {
 	config    *configs.Conf
@@ -113,7 +115,7 @@ func (a *App) DeleteOldEpisodes(podcastIDs string) {
 }
 
 // GenerateFeed for podcasts
-func (a *App) GenerateFeed(podcastIDs string) {
+func (a *App) GenerateFeed(podcastIDs string, podcastImages map[string]string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	wg := sync.WaitGroup{}
@@ -121,7 +123,13 @@ func (a *App) GenerateFeed(podcastIDs string) {
 		wg.Add(1)
 		go func(i string, p configs.Podcast) {
 			defer wg.Done()
-			feedFilename, err := a.processor.GenerateFeed(i, p.Title, p.Folder)
+
+			podcastImageURL, ok := podcastImages[i]
+			if !ok {
+				podcastImageURL = ""
+			}
+
+			feedFilename, err := a.processor.GenerateFeed(i, p.Title, p.Folder, podcastImageURL)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -130,6 +138,50 @@ func (a *App) GenerateFeed(podcastIDs string) {
 		}(i, p)
 	}
 	wg.Wait()
+}
+
+// UploadPodcastImage by podcast to s3 storage
+func (a *App) UploadPodcastImage(podcastIDs string) map[string]string {
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+
+	var result = make(map[string]string, len(podcasts))
+	wg := sync.WaitGroup{}
+	for i, p := range podcasts {
+		wg.Add(1)
+		go func(wg *sync.WaitGroup, i string, p configs.Podcast) {
+			defer wg.Done()
+
+			imageURL, err := a.processor.UploadPodcastImage(i, p.Folder, podcastDefaultImage)
+			if err != nil {
+				log.Printf("[ERROR] can't upload podcast image %s, %v", podcastDefaultImage, err)
+				return
+			}
+
+			result[i] = imageURL
+		}(&wg, i, p)
+	}
+
+	wg.Wait()
+
+	return result
+}
+
+// GetPodcastImages by podcast from s3 storage
+func (a *App) GetPodcastImages(podcastIDs string) map[string]string {
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+
+	var result = make(map[string]string, len(podcasts))
+	wg := sync.WaitGroup{}
+	for i, p := range podcasts {
+		wg.Add(1)
+		go func(wg *sync.WaitGroup, i string, p configs.Podcast) {
+			defer wg.Done()
+			result[i] = a.processor.GetPodcastImage(p.Folder, podcastDefaultImage)
+		}(&wg, i, p)
+	}
+	wg.Wait()
+
+	return result
 }
 
 func (a *App) findPodcasts() map[string]configs.Podcast {

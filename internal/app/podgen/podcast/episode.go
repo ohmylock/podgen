@@ -15,6 +15,7 @@ const (
 // Episode of podcast
 type Episode struct {
 	Filename string
+	PubDate  string
 	Size     int64
 	Status   Status
 	Location string

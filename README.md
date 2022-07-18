@@ -12,6 +12,7 @@ Application options:
   -s, --db= path to bolddb file. Defaut var/podgen.bdb
   -s, --scan= Find and add new episodes
   -u, --upload= Upload episodes by podcast name (separator quota)
+  -i, --image= Upload podcast's cover (separator quota)
 
 Help Options:
   -h, --help    Show this help message
@@ -30,7 +31,7 @@ podcasts:
     max_size: 10000000 # Optional. Max size limit to upload by once
 
 upload:
-  chunk_size: 3 # How meny episodes uploaded on stream
+  chunk_size: 3 # How many episodes uploaded on stream
   
 cloud_storage:
   endpoint_url: "storage.aws.com" # S3 storage endpoint url
