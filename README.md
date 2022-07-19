@@ -9,10 +9,10 @@ Podcast Generator is simple application for upload some episodes to s3 storage a
 ```
 Application options:
   -c, --conf= config file (yml). Default podgen.yml
-  -s, --db= path to bolddb file. Defaut var/podgen.bdb
+  -s, --db= path to bolddb file.
   -s, --scan= Find and add new episodes
-  -u, --upload= Upload episodes by podcast name (separator quota)
-  -i, --image= Upload podcast's cover (separator quota)
+  -u, --upload= Upload episodes by podcast name. Put codes of podcast from yaml file (separator quota)
+  -i, --image= Upload podcast's cover. Put codes of podcast from yaml file (separator quota). You could put image to folder of podcast, and renamed to podcast.png
 
 Help Options:
   -h, --help    Show this help message
@@ -30,13 +30,14 @@ podcasts:
     folder: "demo" # Podcast where store episodes
     max_size: 10000000 # Optional. Max size limit to upload by once
 
+db: "podgen.bdb" # Path to bolt db file
 upload:
   chunk_size: 3 # How many episodes uploaded on stream
   
 cloud_storage:
-  endpoint_url: "storage.aws.com" # S3 storage endpoint url
-  bucket: "YOU_SHOULD_SET_YOUR_S3_BUCKET_NAME" # S3 storage bucket
-  region: "YOU_SHOULD_SET_YOUR_S3_REGION" # S3 storage region
+  endpoint_url: "s3.aws.com" # S3 storage endpoint url
+  bucket: "podgen_bucket" # S3 storage bucket
+  region: "central-eu1" # S3 storage region
   secrets:
-    aws_key: "YOU_SHOULD_SET_YOUR_AWS_KEY" # S3 storage uploader aws key
-    aws_secret: "YOU_SHOULD_SET_YOUR_AWS_SECRET" # S3 storage uploader aws secret
+    aws_key: "i8JFVo4fXxTCbqjU89" # S3 storage uploader aws key
+    aws_secret: "egUiXQ6HFmmEY77r3j_W9ML74CkPHLw7P" # S3 storage uploader aws secret
