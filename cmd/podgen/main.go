@@ -14,15 +14,20 @@ import (
 var opts struct {
 	Conf        string `short:"c" long:"conf" env:"PODGEN_CONF" default:"podgen.yml" description:"config file (yml)"`
 	DB          string `short:"d" long:"db" env:"PODGEN_DB" description:"bolt db file"`
-	Upload      string `short:"u" long:"upload" description:"Upload episodes by podcast name (separator quota)"`
+	Upload      bool   `short:"u" long:"upload" description:"Upload episodes"`
 	Scan        bool   `short:"s" long:"scan" description:"Find and add new episodes"`
-	UpdateFeed  string `short:"f" long:"feed" description:"Regenerate feeds"`
-	UpdateImage string `short:"i" long:"image" description:"re upload cover of podcasts"`
-
+	UpdateFeed  bool   `short:"f" long:"feed" description:"Regenerate feeds"`
+	UpdateImage bool   `short:"i" long:"image" description:"re upload cover of podcasts"`
+	Podcasts    string `short:"p" long:"podcast" description:"Podcasts name (separator quota)"`
+	AllPodcasts bool   `short:"a" long:"all" description:"All podcasts"`
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
 }
 
+var version string
+
 func main() {
+	fmt.Printf("podgen %s\n", version)
+
 	p := flags.NewParser(&opts, flags.PassDoubleDash|flags.HelpFlag)
 	if _, err := p.Parse(); err != nil {
 		if err.(*flags.Error).Type != flags.ErrHelp {
@@ -93,28 +98,43 @@ func main() {
 		log.Fatalf("[ERROR] can't create app, %v", err)
 	}
 
-	if opts.Scan {
-		app.Update()
+	podcasts := opts.Podcasts
+	if podcasts == "" && opts.AllPodcasts {
+		podcastEntities := app.FindPodcasts()
+
+		for i := range podcastEntities {
+			if podcasts != "" {
+				podcasts += ", "
+			}
+			podcasts += i
+		}
 	}
+
+	if podcasts == "" {
+		log.Fatalf("[ERROR] You didn't list podcasts")
+	}
+
+	if opts.Scan {
+		app.Update(podcasts)
+	}
+
 	var images map[string]string
 
-	if opts.UpdateImage != "" {
-		images = app.UploadPodcastImage(opts.UpdateImage)
+	if opts.UpdateImage {
+		images = app.UploadPodcastImage(podcasts)
 	}
 
-	if opts.Upload != "" {
-		app.DeleteOldEpisodes(opts.Upload)
-		app.UploadEpisodes(opts.Upload)
+	if opts.Upload {
+		app.DeleteOldEpisodes(podcasts)
+		app.UploadEpisodes(podcasts)
 
-		if opts.UpdateFeed == "" {
-			opts.UpdateFeed = opts.Upload
-		}
+		opts.UpdateFeed = true
 	}
 
-	if opts.UpdateFeed != "" {
+	if opts.UpdateFeed {
 		if images == nil {
-			images = app.GetPodcastImages(opts.UpdateFeed)
+			images = app.GetPodcastImages(podcasts)
 		}
-		app.GenerateFeed(opts.UpdateFeed, images)
+		app.GenerateFeed(podcasts, images)
 	}
 }
