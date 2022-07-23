@@ -3,6 +3,18 @@ podcasts:
     title: "demo podcast"
     folder: "demo"
     max_size: 10000000
+    delete_old_episodes: true
+    info:
+      author: user
+      owner: user
+      email: podgen-user@localhost.com
+      category: History
+  demo2:
+    title: "demo2 podcast"
+    folder: "demopod"
+    max_size: 1000000000
+    info:
+      category: "True Crim"
 
 upload:
   chunk_size: 3

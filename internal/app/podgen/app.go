@@ -61,8 +61,8 @@ func NewS3Client(endpoint, accessKeyID, secretAccessKey string, useSSL bool) (*m
 }
 
 // Update find and add to db new episodes of podcast
-func (a *App) Update() {
-	podcasts := a.findPodcasts()
+func (a *App) Update(podcastIDs string) {
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	wg := sync.WaitGroup{}
 	for i, p := range podcasts {
@@ -105,6 +105,11 @@ func (a *App) DeleteOldEpisodes(podcastIDs string) {
 		wg.Add(1)
 		go func(i string, p configs.Podcast) {
 			defer wg.Done()
+
+			if !p.DeleteOldEpisodes {
+				return
+			}
+
 			err := a.processor.DeleteOldEpisodesByPodcast(i, p.Folder)
 			if err != nil {
 				log.Fatalf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
@@ -129,7 +134,7 @@ func (a *App) GenerateFeed(podcastIDs string, podcastImages map[string]string) {
 				podcastImageURL = ""
 			}
 
-			feedFilename, err := a.processor.GenerateFeed(i, p.Title, p.Folder, podcastImageURL)
+			feedFilename, err := a.processor.GenerateFeed(i, p, podcastImageURL)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -184,7 +189,8 @@ func (a *App) GetPodcastImages(podcastIDs string) map[string]string {
 	return result
 }
 
-func (a *App) findPodcasts() map[string]configs.Podcast {
+// FindPodcasts get list podcast from config file
+func (a *App) FindPodcasts() map[string]configs.Podcast {
 	return a.config.Podcasts
 }
 
@@ -198,12 +204,12 @@ func (a *App) updateFolder(folderName, podcastID string) (int64, error) {
 }
 
 func (a *App) filterPodcastsByPodcastIDs(podcastIDs string) map[string]configs.Podcast {
-	podcasts := a.findPodcasts()
+	podcasts := a.FindPodcasts()
 	var result = make(map[string]configs.Podcast, len(podcasts))
 	splitPodcastIDs := strings.Split(podcastIDs, ",")
 	for podcastID, p := range podcasts {
 		for _, rawPodcastID := range splitPodcastIDs {
-			if podcastID != rawPodcastID {
+			if podcastID != strings.Trim(rawPodcastID, " ") {
 				continue
 			}
 			result[podcastID] = p

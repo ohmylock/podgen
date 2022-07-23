@@ -29,9 +29,17 @@ type Conf struct {
 
 // Podcast defines podcast section
 type Podcast struct {
-	Title   string `yaml:"title"`
-	Folder  string `yaml:"folder"`
-	MaxSize int64  `yaml:"max_size"`
+	Title             string `yaml:"title"`
+	Folder            string `yaml:"folder"`
+	MaxSize           int64  `yaml:"max_size"`
+	DeleteOldEpisodes bool   `yaml:"delete_old_episodes"`
+	Info              struct {
+		Author   string `yaml:"author"`
+		Owner    string `yaml:"owner"`
+		Email    string `yaml:"email"`
+		Category string `yaml:"category"`
+		Language string `yaml:"language"`
+	} `yaml:"info"`
 }
 
 // Load config from file

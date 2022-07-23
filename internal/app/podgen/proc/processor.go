@@ -11,6 +11,7 @@ import (
 	log "github.com/go-pkgz/lgr"
 	"github.com/minio/minio-go/v7"
 	"podgen/internal/app/podgen/podcast"
+	"podgen/internal/configs"
 )
 
 // Processor is searcher of episode files and writer to store
@@ -210,7 +211,7 @@ func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit
 }
 
 // GenerateFeed to podcast
-func (p *Processor) GenerateFeed(podcastID, podcastTitle, podcastFolder, podcastImageURL string) (string, error) {
+func (p *Processor) GenerateFeed(podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
 	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
 	if err != nil {
 		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
@@ -218,28 +219,57 @@ func (p *Processor) GenerateFeed(podcastID, podcastTitle, podcastFolder, podcast
 
 	var header, body, footer string
 
+	info := map[string]string{
+		"author":   "PodGen",
+		"email":    "podgen@localhost.com",
+		"owner":    "PodGen",
+		"category": "History",
+		"language": "EN",
+	}
+
+	if podcastEntity.Info.Author != "" {
+		info["author"] = podcastEntity.Info.Author
+	}
+
+	if podcastEntity.Info.Email != "" {
+		info["email"] = podcastEntity.Info.Email
+	}
+
+	if podcastEntity.Info.Owner != "" {
+		info["owner"] = podcastEntity.Info.Owner
+	}
+
+	if podcastEntity.Info.Category != "" {
+		info["category"] = podcastEntity.Info.Category
+	}
+
+	if podcastEntity.Info.Language != "" {
+		info["language"] = podcastEntity.Info.Language
+	}
+
 	header = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
 		"<rss xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\" " +
 		"xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:atom=\"http://www.w3.org/2005/Atom\" " +
 		"xmlns:googleplay=\"http://www.google.com/schemas/play-podcasts/1.0\" version=\"2.0\">\n" +
 		"<channel>\n" +
-		fmt.Sprintf("<title>%s</title>\n<description><![CDATA[%s]]></description>\n", podcastTitle, podcastTitle) +
-		"<generator>PodGen</generator>\n<language>EN</language>\n" +
+		fmt.Sprintf("<title>%s</title>\n<description><![CDATA[%s]]></description>\n", podcastEntity.Title, podcastEntity.Title) +
+		"<generator>PodGen</generator>\n" +
+		fmt.Sprintf("<language>%s</language>\n", info["language"]) +
 		"<itunes:explicit>No</itunes:explicit>\n" +
-		fmt.Sprintf("<itunes:subtitle>%s</itunes:subtitle>\n<itunes:summary><![CDATA[%s]]></itunes:summary>\n", podcastTitle, podcastTitle) +
-		"<itunes:author>PodGen</itunes:author>\n" +
-		"<author>PodGen</author>\n" +
+		fmt.Sprintf("<itunes:subtitle>%s</itunes:subtitle>\n<itunes:summary><![CDATA[%s]]></itunes:summary>\n", podcastEntity.Title, podcastEntity.Title) +
+		fmt.Sprintf("<itunes:author>%s</itunes:author>\n", info["author"]) +
+		fmt.Sprintf("<author>%s</author>\n", info["author"]) +
 		"<image>\n" +
 		fmt.Sprintf("<url>%s</url>\n", podcastImageURL) +
 		"</image>\n" +
 		fmt.Sprintf("<itunes:image href=%q />\n", podcastImageURL) +
 		"<itunes:owner>\n" +
-		"<itunes:name>PodGen</itunes:name>\n" +
-		"<itunes:email>podgen@localhost.com</itunes:email>\n" +
+		fmt.Sprintf("<itunes:name>%s</itunes:name>\n", info["owner"]) +
+		fmt.Sprintf("<itunes:email>%s</itunes:email>\n", info["email"]) +
 		"</itunes:owner>\n" +
-		"<itunes:category text=\"Technology\"/>"
+		fmt.Sprintf("<itunes:category text=%q />\n", info["category"])
 
-	footer = "\n</channel>\n</rss>"
+	footer = "</channel>\n</rss>"
 	for _, episode := range episodes {
 		body += "<item>\n" +
 			fmt.Sprintf("<title>%s</title>\n", episode.Filename) +
@@ -258,7 +288,7 @@ func (p *Processor) GenerateFeed(podcastID, podcastTitle, podcastFolder, podcast
 		log.Fatalf("[ERROR] can't generate feed key for %s, %v", podcastID, err)
 	}
 	feedFilename := fmt.Sprintf("%s.rss", feedKey)
-	feedPath := fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, feedFilename)
+	feedPath := fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastEntity.Folder, feedFilename)
 	f, err := os.Create(feedPath) // nolint
 	if err != nil {
 		log.Fatalf("[ERROR] can't create file %s, %v", feedPath, err)

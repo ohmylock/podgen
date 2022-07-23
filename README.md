@@ -4,15 +4,18 @@ Podcast Generator is simple application for upload some episodes to s3 storage a
 
 ## Usage
 
-`podgen -s -u demopodcast, testpod`
+`podgen -s -u -p demopodcast, testpod`
 
 ```
 Application options:
   -c, --conf= config file (yml). Default podgen.yml
-  -s, --db= path to bolddb file.
-  -s, --scan= Find and add new episodes
-  -u, --upload= Upload episodes by podcast name. Put codes of podcast from yaml file (separator quota)
-  -i, --image= Upload podcast's cover. Put codes of podcast from yaml file (separator quota). You could put image to folder of podcast, and renamed to podcast.png
+  -d, --db= path to bolddb file.
+  -s, --scan= Find and add new episodes.
+  -u, --upload= Upload episodes.
+  -i, --image= Upload podcast's cover.
+  -p, --podcast= Put podcasts code from yaml file (separator quota)
+  -a, --all All podcasts.
+  
 
 Help Options:
   -h, --help    Show this help message
@@ -29,6 +32,12 @@ podcasts:
     title: "Demo Podcast" # Podcast title
     folder: "demo" # Podcast where store episodes
     max_size: 10000000 # Optional. Max size limit to upload by once
+    delete_old_episodes: true # Need to delete episodes before to upload new
+    info: # Information in podcast feed
+      author: user1 # Author of podcast 
+      owner: user1 # Who own podcast
+      email: podgen-user@localhost.com # Owner's podcast email
+      category: History # Podcast category. You can read all categories in apple support information https://podcasters.apple.com/support/1691-apple-podcasts-categories 
 
 db: "podgen.bdb" # Path to bolt db file
 upload:
