@@ -15,7 +15,7 @@ builds:
       - goos: freebsd
         goarch: arm64
     dir: cmd/podgen
-    ldflags: "-s -w -X main.revision={{.Tag}}-{{.ShortCommit}}-{{.CommitDate}}"
+    ldflags: "-s -w -X main.version={{.Tag}}"
 
 archives:
   - name_template: "{{.ProjectName}}_{{.Tag}}_{{.Os}}_{{.Arch}}"
