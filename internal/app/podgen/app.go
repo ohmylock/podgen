@@ -1,3 +1,4 @@
+// Package podgen main
 package podgen
 
 import (
