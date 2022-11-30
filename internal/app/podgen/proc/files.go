@@ -1,3 +1,4 @@
+// Package proc package for work with files
 package proc
 
 import (

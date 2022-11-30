@@ -82,7 +82,7 @@ func (p *Processor) DeleteOldEpisodesByPodcast(podcastID, podcastFolder string) 
 
 		go func(deleteCh chan DeletedEpisode, podcastID string, episodeItem *podcast.Episode) {
 			defer wg.Done()
-			log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
+			log.Printf("[INFO] Started delete episode %s - %s", podcastID, episodeItem.Filename)
 			err := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
 			if err != nil {
 				log.Printf("[ERROR] can't delete episode %s, %v", episodeItem.Filename, err)
@@ -143,19 +143,21 @@ func (p *Processor) UploadPodcastImage(podcastID, podcastFolder, podcastImageFil
 	}
 
 	log.Printf("[INFO] Image of podcast uploaded %s - %s", podcastImageFilename, uploadInfo.Location)
+
 	return uploadInfo.Location, nil
 }
 
 // GetPodcastImage from s3 storage
 func (p *Processor) GetPodcastImage(podcastFolder, podcastImageFilename string) string {
 	ctx := context.Background()
-	imageInfo, err := p.S3Client.GetObjectInfo(ctx,
-		fmt.Sprintf("%s/%s", podcastFolder, podcastImageFilename))
+
+	imageInfo, err := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, podcastImageFilename))
+
 	if err != nil {
 		log.Printf("[ERROR] can't image info %s, %v", podcastImageFilename, err)
 		return ""
 	}
-	return imageInfo.Key
+	return imageInfo.Location
 }
 
 // UploadNewEpisodes get new episodes by total limit of size and upload to s3 storage
@@ -194,6 +196,7 @@ func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit
 				episode, err := p.Storage.GetEpisodeByFilename(uploadedEpisode.PodcastID, uploadedEpisode.Filename)
 				if err != nil {
 					log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
+					return
 				}
 				episode.Status = podcast.Uploaded
 				episode.Location = uploadedEpisode.Location

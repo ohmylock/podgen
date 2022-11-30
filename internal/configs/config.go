@@ -1,3 +1,4 @@
+// Package configs for work with configurations
 package configs
 
 import (

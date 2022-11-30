@@ -1,3 +1,4 @@
+// Package podcast for work with podcast's episodes
 package podcast
 
 // Status of episode

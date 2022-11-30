@@ -1,3 +1,4 @@
+// Package main start
 package main
 
 import (
