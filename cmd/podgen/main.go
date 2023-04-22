@@ -13,14 +13,16 @@ import (
 )
 
 var opts struct {
-	Conf        string `short:"c" long:"conf" env:"PODGEN_CONF" default:"podgen.yml" description:"config file (yml)"`
-	DB          string `short:"d" long:"db" env:"PODGEN_DB" description:"bolt db file"`
-	Upload      bool   `short:"u" long:"upload" description:"Upload episodes"`
-	Scan        bool   `short:"s" long:"scan" description:"Find and add new episodes"`
-	UpdateFeed  bool   `short:"f" long:"feed" description:"Regenerate feeds"`
-	UpdateImage bool   `short:"i" long:"image" description:"re upload cover of podcasts"`
-	Podcasts    string `short:"p" long:"podcast" description:"Podcasts name (separator quota)"`
-	AllPodcasts bool   `short:"a" long:"all" description:"All podcasts"`
+	Conf              string `short:"c" long:"conf" env:"PODGEN_CONF" default:"podgen.yml" description:"config file (yml)"`
+	DB                string `short:"d" long:"db" env:"PODGEN_DB" description:"bolt db file"`
+	Upload            bool   `short:"u" long:"upload" description:"Upload episodes"`
+	Scan              bool   `short:"s" long:"scan" description:"Find and add new episodes"`
+	UpdateFeed        bool   `short:"f" long:"feed" description:"Regenerate feeds"`
+	UpdateImage       bool   `short:"i" long:"image" description:"re upload cover of podcasts"`
+	Podcasts          string `short:"p" long:"podcast" description:"Podcasts name (separator quota)"`
+	AllPodcasts       bool   `short:"a" long:"all" description:"All podcasts"`
+	Rollback          bool   `short:"r" long:"rollback" description:"Rollback last episode"`
+	RollbackBySession string `long:"rollback-session" description:"Rollback by session name"`
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
 }
 
@@ -114,9 +116,14 @@ func main() {
 	if podcasts == "" {
 		log.Fatalf("[ERROR] You didn't list podcasts")
 	}
+	needCommit := false
+	tx, err := app.CreateTransaction()
+	if err != nil {
+		log.Fatalf("[ERROR] can't create transaction, %v", err)
+	}
 
 	if opts.Scan {
-		app.Update(podcasts)
+		app.Update(tx, podcasts)
 	}
 
 	var images map[string]string
@@ -125,17 +132,33 @@ func main() {
 		images = app.UploadPodcastImage(podcasts)
 	}
 
-	if opts.Upload {
-		app.DeleteOldEpisodes(podcasts)
-		app.UploadEpisodes(podcasts)
+	if opts.Rollback {
+		app.RollbackEpisodes(tx, podcasts)
+		needCommit = true
+	} else if opts.RollbackBySession != "" {
+		app.RollbackEpisodesBySession(tx, podcasts, opts.RollbackBySession)
+		needCommit = true
+	}
 
+	if opts.Upload {
+		app.DeleteOldEpisodes(tx, podcasts)
+		app.UploadEpisodes(tx, podcasts)
 		opts.UpdateFeed = true
+		needCommit = true
 	}
 
 	if opts.UpdateFeed {
 		if images == nil {
 			images = app.GetPodcastImages(podcasts)
 		}
-		app.GenerateFeed(podcasts, images)
+		app.GenerateFeed(tx, podcasts, images)
+	}
+
+	if needCommit {
+		err = tx.Commit()
+		if err != nil {
+			log.Fatalf("[ERROR] can't commit transaction, %v", err)
+			return
+		}
 	}
 }
