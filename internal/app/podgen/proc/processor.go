@@ -123,7 +123,7 @@ Loop:
 
 // RollbackLastEpisodes last deleted episode
 func (p *Processor) RollbackLastEpisodes(tx *bolt.Tx, podcastID string) error {
-	episode, err := p.Storage.GetLastEpisodeByStatus(podcastID, podcast.Deleted)
+	episode, err := p.Storage.GetLastEpisodeByNotStatus(tx, podcastID, podcast.New)
 	if err != nil {
 		log.Printf("[ERROR] can't find episodes %s, %v", podcastID, err)
 		return err
