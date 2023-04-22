@@ -15,6 +15,8 @@ Application options:
   -i, --image= Upload podcast's cover.
   -p, --podcast= Put podcasts code from yaml file (separator quota)
   -a, --all All podcasts.
+  -r, --rollback          Rollback last episode
+      --rollback-session= Rollback by session name
   
 
 Help Options:
