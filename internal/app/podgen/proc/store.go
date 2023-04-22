@@ -212,6 +212,33 @@ func (b *BoltDB) GetLastEpisodeByStatus(podcastID string, status podcast.Status)
 	return result, err
 }
 
+// GetLastEpisodeByNotStatus get last episode from store by not status
+func (b *BoltDB) GetLastEpisodeByNotStatus(tx *bolt.Tx, podcastID string, status podcast.Status) (*podcast.Episode, error) {
+	var result *podcast.Episode
+	bucket := tx.Bucket([]byte(podcastID))
+	if bucket == nil {
+		log.Fatalf("no bucket for %s", podcastID)
+	}
+
+	c := bucket.Cursor()
+	for k, v := c.Last(); k != nil; k, v = c.Prev() {
+		item := podcast.Episode{}
+		if err := json.Unmarshal(v, &item); err != nil {
+			log.Printf("[WARN] failed to unmarshal, %v", err)
+			continue
+		}
+
+		if item.Status == status {
+			continue
+		}
+
+		result = &item
+		break
+	}
+
+	return result, nil
+}
+
 // CreateTransaction create transaction
 func (b *BoltDB) CreateTransaction() (*bolt.Tx, error) {
 	return b.DB.Begin(true)
