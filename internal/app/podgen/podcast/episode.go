@@ -20,4 +20,5 @@ type Episode struct {
 	Size     int64
 	Status   Status
 	Location string
+	Session  string
 }

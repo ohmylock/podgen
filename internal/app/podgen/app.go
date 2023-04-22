@@ -2,6 +2,7 @@
 package podgen
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path"
@@ -62,66 +63,73 @@ func NewS3Client(endpoint, accessKeyID, secretAccessKey string, useSSL bool) (*m
 }
 
 // Update find and add to db new episodes of podcast
-func (a *App) Update(podcastIDs string) {
+func (a *App) Update(tx *bolt.Tx, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	wg := sync.WaitGroup{}
 	for i, p := range podcasts {
 		wg.Add(1)
-		go func(i string, p configs.Podcast) {
+		go func(i string, p configs.Podcast, tx *bolt.Tx) {
 			defer wg.Done()
-			countNew, err := a.updateFolder(p.Folder, i)
+			countNew, err := a.updateFolder(tx, p.Folder, i)
 			if err != nil {
 				return
 			}
 			if countNew > 0 {
 				log.Printf("[INFO] found new %d episodes for %s", countNew, p.Title)
 			}
-		}(i, p)
+		}(i, p, tx)
 	}
 	wg.Wait()
 }
 
 // UploadEpisodes by podcasts to s3 storage
-func (a *App) UploadEpisodes(podcastIDs string) {
+func (a *App) UploadEpisodes(tx *bolt.Tx, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+
+	session, err := a.makeSessionString()
+	if err != nil {
+		log.Fatalf("[ERROR] can't make session string, %v", err)
+	}
+
+	log.Printf("[INFO] Start session: %s", session)
 
 	wg := sync.WaitGroup{}
 	for i, p := range podcasts {
 		wg.Add(1)
-		go func(wg *sync.WaitGroup, i string, p configs.Podcast) {
+		go func(wg *sync.WaitGroup, i string, session string, p configs.Podcast, tx *bolt.Tx) {
 			defer wg.Done()
-			a.processor.UploadNewEpisodes(i, p.Folder, p.MaxSize)
-		}(&wg, i, p)
+			a.processor.UploadNewEpisodes(tx, session, i, p.Folder, p.MaxSize)
+		}(&wg, i, session, p, tx)
 	}
 	wg.Wait()
 }
 
 // DeleteOldEpisodes delete old episodes by podcasts
-func (a *App) DeleteOldEpisodes(podcastIDs string) {
+func (a *App) DeleteOldEpisodes(tx *bolt.Tx, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	wg := sync.WaitGroup{}
 	for i, p := range podcasts {
 		wg.Add(1)
-		go func(i string, p configs.Podcast) {
+		go func(i string, p configs.Podcast, tx *bolt.Tx) {
 			defer wg.Done()
 
 			if !p.DeleteOldEpisodes {
 				return
 			}
 
-			err := a.processor.DeleteOldEpisodesByPodcast(i, p.Folder)
+			err := a.processor.DeleteOldEpisodesByPodcast(tx, i, p.Folder)
 			if err != nil {
 				log.Fatalf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
 			}
-		}(i, p)
+		}(i, p, tx)
 	}
 	wg.Wait()
 }
 
 // GenerateFeed for podcasts
-func (a *App) GenerateFeed(podcastIDs string, podcastImages map[string]string) {
+func (a *App) GenerateFeed(tx *bolt.Tx, podcastIDs string, podcastImages map[string]string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	wg := sync.WaitGroup{}
@@ -135,7 +143,7 @@ func (a *App) GenerateFeed(podcastIDs string, podcastImages map[string]string) {
 				podcastImageURL = ""
 			}
 
-			feedFilename, err := a.processor.GenerateFeed(i, p, podcastImageURL)
+			feedFilename, err := a.processor.GenerateFeed(tx, i, p, podcastImageURL)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -195,8 +203,60 @@ func (a *App) FindPodcasts() map[string]configs.Podcast {
 	return a.config.Podcasts
 }
 
-func (a *App) updateFolder(folderName, podcastID string) (int64, error) {
-	countNew, err := a.processor.Update(folderName, podcastID)
+// CreateTransaction create transaction for db
+func (a *App) CreateTransaction() (*bolt.Tx, error) {
+	tx, err := a.processor.Storage.CreateTransaction()
+	if err != nil {
+		return nil, err
+	}
+
+	return tx, nil
+}
+
+// RollbackEpisodes rollback last episode by podcasts
+func (a *App) RollbackEpisodes(tx *bolt.Tx, podcastIDs string) {
+
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+
+	wg := sync.WaitGroup{}
+	for i, p := range podcasts {
+		wg.Add(1)
+		go func(i string, p configs.Podcast) {
+			defer wg.Done()
+
+			err := a.processor.RollbackLastEpisodes(tx, i)
+			if err != nil {
+				log.Printf("[ERROR] can't rollback episode by podcast %s, %v", i, err)
+			}
+		}(i, p)
+	}
+	wg.Wait()
+
+}
+
+// RollbackEpisodesBySession rollback episodes by podcasts and session
+func (a *App) RollbackEpisodesBySession(tx *bolt.Tx, podcastIDs, session string) {
+
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+
+	wg := sync.WaitGroup{}
+	for i, p := range podcasts {
+		wg.Add(1)
+		go func(i string, p configs.Podcast) {
+			defer wg.Done()
+
+			err := a.processor.RollbackEpisodesOfSession(tx, i, session)
+			if err != nil {
+				log.Printf("[ERROR] can't rollback episode by podcast %s, %v", i, err)
+			}
+		}(i, p)
+	}
+	wg.Wait()
+
+}
+
+func (a *App) updateFolder(tx *bolt.Tx, folderName, podcastID string) (int64, error) {
+	countNew, err := a.processor.Update(tx, folderName, podcastID)
 	if err != nil {
 		return 0, err
 	}
@@ -218,4 +278,15 @@ func (a *App) filterPodcastsByPodcastIDs(podcastIDs string) map[string]configs.P
 	}
 
 	return result
+}
+
+// makeSessionString generate session string
+func (a *App) makeSessionString() (string, error) {
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		log.Printf("[ERROR] can't generate session string, %v", err)
+		return "", err
+	}
+	return fmt.Sprintf("%x", b), nil
 }

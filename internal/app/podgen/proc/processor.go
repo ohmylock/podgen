@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/boltdb/bolt"
 	"os"
 	"sync"
 
@@ -36,7 +37,7 @@ type DeletedEpisode struct {
 }
 
 // Update podcast files
-func (p *Processor) Update(folderName, podcastID string) (int64, error) {
+func (p *Processor) Update(tx *bolt.Tx, folderName, podcastID string) (int64, error) {
 	var countNew int64
 	episodes, err := p.Files.FindEpisodes(folderName)
 	if err != nil {
@@ -48,7 +49,7 @@ func (p *Processor) Update(folderName, podcastID string) (int64, error) {
 		if episode == nil {
 			continue
 		}
-		item, err := p.Storage.GetEpisodeByFilename(podcastID, episode.Filename)
+		item, err := p.Storage.GetEpisodeByFilename(tx, podcastID, episode.Filename)
 		if err != nil {
 			log.Printf("get episode by filename error, %v", err)
 		}
@@ -57,7 +58,7 @@ func (p *Processor) Update(folderName, podcastID string) (int64, error) {
 			continue
 		}
 
-		e := p.Storage.SaveEpisode(podcastID, episode)
+		e := p.Storage.SaveEpisode(tx, podcastID, episode)
 		if e != nil {
 			log.Fatalf("[ERROR] can't add episode %s to %s, %v", episode.Filename, podcastID, e)
 		}
@@ -68,8 +69,8 @@ func (p *Processor) Update(folderName, podcastID string) (int64, error) {
 }
 
 // DeleteOldEpisodesByPodcast from s3 storage
-func (p *Processor) DeleteOldEpisodesByPodcast(podcastID, podcastFolder string) error {
-	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
+func (p *Processor) DeleteOldEpisodesByPodcast(tx *bolt.Tx, podcastID, podcastFolder string) error {
+	episodes, err := p.Storage.FindEpisodesByStatus(tx, podcastID, podcast.Uploaded)
 	if err != nil {
 		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
 	}
@@ -103,12 +104,12 @@ Loop:
 	for {
 		select {
 		case deletedEpisode := <-deleteCh:
-			episode, err := p.Storage.GetEpisodeByFilename(deletedEpisode.PodcastID, deletedEpisode.Filename)
+			episode, err := p.Storage.GetEpisodeByFilename(tx, deletedEpisode.PodcastID, deletedEpisode.Filename)
 			if err != nil {
 				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", deletedEpisode.PodcastID, deletedEpisode.Filename, err)
 			}
 			episode.Status = podcast.Deleted
-			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
+			if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
 				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
 			}
 		case <-done:
@@ -117,6 +118,60 @@ Loop:
 			break Loop
 		}
 	}
+	return nil
+}
+
+// RollbackLastEpisodes last deleted episode
+func (p *Processor) RollbackLastEpisodes(tx *bolt.Tx, podcastID string) error {
+	episode, err := p.Storage.GetLastEpisodeByStatus(podcastID, podcast.Deleted)
+	if err != nil {
+		log.Printf("[ERROR] can't find episodes %s, %v", podcastID, err)
+		return err
+	}
+
+	if episode == nil {
+		log.Printf("[INFO] Episode for rollback not found %s", podcastID)
+		return nil
+	}
+
+	if episode.Session != "" {
+		return p.RollbackEpisodesOfSession(tx, podcastID, episode.Session)
+	}
+
+	episode.Status = podcast.New
+	if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
+		log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+		return err
+	}
+
+	return nil
+}
+
+// RollbackEpisodesOfSession last deleted episode of session
+func (p *Processor) RollbackEpisodesOfSession(tx *bolt.Tx, podcastID, session string) error {
+	episodes, err := p.Storage.FindEpisodesBySession(tx, podcastID, session)
+	if err != nil {
+		log.Printf("[ERROR] can't find episodes %s, %v", podcastID, err)
+		return err
+	}
+
+	if len(episodes) == 0 {
+		log.Printf("[INFO] Episodes for rollback not found %s", podcastID)
+		return nil
+	}
+
+	log.Printf("[INFO] Started rollback episodes %s", podcastID)
+
+	for _, episode := range episodes {
+		episode.Status = podcast.New
+		if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
+			log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+			return err
+		}
+
+		log.Printf("[INFO] Episode rollback %s - %s", episode.Filename, podcastID)
+	}
+
 	return nil
 }
 
@@ -161,8 +216,8 @@ func (p *Processor) GetPodcastImage(podcastFolder, podcastImageFilename string) 
 }
 
 // UploadNewEpisodes get new episodes by total limit of size and upload to s3 storage
-func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit int64) {
-	episodes, err := p.Storage.FindEpisodesBySizeLimit(podcastID, podcast.New, sizeLimit)
+func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFolder string, sizeLimit int64) {
+	episodes, err := p.Storage.FindEpisodesBySizeLimit(tx, podcastID, podcast.New, sizeLimit)
 	if err != nil {
 		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
 	}
@@ -181,7 +236,12 @@ func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit
 
 		for _, episode := range episodes[i:end] {
 			wg.Add(1)
-			go p.uploadProcess(ctx, &wg, uploadCh, podcastID, podcastFolder, episode)
+			go func(episode *podcast.Episode) {
+				err := p.uploadProcess(ctx, tx, &wg, uploadCh, podcastID, podcastFolder, episode)
+				if err != nil {
+					log.Fatalf("[ERROR] can't upload episode %s, %v", episode.Filename, err)
+				}
+			}(episode)
 		}
 
 		go func() {
@@ -193,15 +253,21 @@ func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit
 		for {
 			select {
 			case uploadedEpisode := <-uploadCh:
-				episode, err := p.Storage.GetEpisodeByFilename(uploadedEpisode.PodcastID, uploadedEpisode.Filename)
+				episode, err := p.Storage.GetEpisodeByFilename(tx, uploadedEpisode.PodcastID, uploadedEpisode.Filename)
 				if err != nil {
 					log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
 					return
 				}
+				episode.Session = session
 				episode.Status = podcast.Uploaded
 				episode.Location = uploadedEpisode.Location
-				if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
-					log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+				if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
+					err := tx.Rollback()
+					if err != nil {
+						log.Printf("[ERROR] can't rollback transaction %v", err)
+					}
+					log.Fatalf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+					return
 				}
 			case <-done:
 				close(uploadCh)
@@ -214,8 +280,8 @@ func (p *Processor) UploadNewEpisodes(podcastID, podcastFolder string, sizeLimit
 }
 
 // GenerateFeed to podcast
-func (p *Processor) GenerateFeed(podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
-	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
+func (p *Processor) GenerateFeed(tx *bolt.Tx, podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
+	episodes, err := p.Storage.FindEpisodesByStatus(tx, podcastID, podcast.Uploaded)
 	if err != nil {
 		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
 	}
@@ -335,7 +401,7 @@ func (p *Processor) getFeedKey(podcastID string) (string, error) {
 	return key, err
 }
 
-func (p *Processor) uploadProcess(ctx context.Context, wg *sync.WaitGroup, uploadCh chan UploadedEpisode, podcastID, podcastFolder string, episodeItem *podcast.Episode) {
+func (p *Processor) uploadProcess(ctx context.Context, tx *bolt.Tx, wg *sync.WaitGroup, uploadCh chan UploadedEpisode, podcastID, podcastFolder string, episodeItem *podcast.Episode) error {
 	defer wg.Done()
 	log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
 	objectInfo, _ := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
@@ -349,8 +415,11 @@ func (p *Processor) uploadProcess(ctx context.Context, wg *sync.WaitGroup, uploa
 			fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
 			fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, episodeItem.Filename))
 		if err != nil {
-			log.Printf("[ERROR] can't upload episode %s, %v", episodeItem.Filename, err)
-			return
+			err := tx.Rollback()
+			if err != nil {
+				log.Printf("[ERROR] can't rollback transaction, %v", err)
+			}
+			return err
 		}
 		location = uploadInfo.Location
 	}
@@ -361,4 +430,6 @@ func (p *Processor) uploadProcess(ctx context.Context, wg *sync.WaitGroup, uploa
 		Filename:  episodeItem.Filename,
 		Location:  location,
 	}
+
+	return nil
 }
