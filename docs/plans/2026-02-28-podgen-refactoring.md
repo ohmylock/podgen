@@ -79,11 +79,11 @@ complexity: Medium
 - Create: `internal/errors/errors.go`
 
 **Steps:**
-- [ ] Create EpisodeError type with PodcastID, Filename, Op, Err fields
-- [ ] Implement Error() and Unwrap() methods
-- [ ] Define sentinel errors: ErrNoBucket, ErrEpisodeNotFound
-- [ ] Write tests for error types
-- [ ] Verify: `go test ./internal/errors/...`
+- [x] Create EpisodeError type with PodcastID, Filename, Op, Err fields
+- [x] Implement Error() and Unwrap() methods
+- [x] Define sentinel errors: ErrNoBucket, ErrEpisodeNotFound
+- [x] Write tests for error types
+- [x] Verify: `go test ./internal/errors/...`
 
 ### Task 4: Replace log.Fatalf in store.go
 
