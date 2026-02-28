@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/boltdb/bolt"
 	log "github.com/go-pkgz/lgr"
@@ -14,12 +15,30 @@ import (
 // BoltDB store
 type BoltDB struct {
 	DB *bolt.DB
+	mu sync.Mutex
+}
+
+// WithWriteTx executes fn within a serialized write transaction.
+func (b *BoltDB) WithWriteTx(fn func(*bolt.Tx) error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.DB.Update(fn)
+}
+
+// WithReadTx executes fn within a read-only transaction.
+func (b *BoltDB) WithReadTx(fn func(*bolt.Tx) error) error {
+	return b.DB.View(fn)
 }
 
 // SaveEpisode save episodes to podcast bucket in bolt db
-func (b *BoltDB) SaveEpisode(tx *bolt.Tx, podcastID string, episode *podcast.Episode) error {
-	key, err := b.getEpisodeKey(episode)
+func (b *BoltDB) SaveEpisode(podcastID string, episode *podcast.Episode) error {
+	return b.WithWriteTx(func(tx *bolt.Tx) error {
+		return b.saveEpisode(tx, podcastID, episode)
+	})
+}
 
+func (b *BoltDB) saveEpisode(tx *bolt.Tx, podcastID string, episode *podcast.Episode) error {
+	key, err := b.getEpisodeKey(episode)
 	if err != nil {
 		return err
 	}
@@ -35,16 +54,21 @@ func (b *BoltDB) SaveEpisode(tx *bolt.Tx, podcastID string, episode *podcast.Epi
 	}
 
 	log.Printf("[INFO] save episode %s - %s", podcastID, episode.Filename)
-	err = bucket.Put(key, jdata)
-	if err != nil {
-		return err
-	}
-
-	return err
+	return bucket.Put(key, jdata)
 }
 
 // FindEpisodesByStatus get episodes from store by status
-func (b *BoltDB) FindEpisodesByStatus(tx *bolt.Tx, podcastID string, filterStatus podcast.Status) ([]*podcast.Episode, error) {
+func (b *BoltDB) FindEpisodesByStatus(podcastID string, filterStatus podcast.Status) ([]*podcast.Episode, error) {
+	var result []*podcast.Episode
+	err := b.WithReadTx(func(tx *bolt.Tx) error {
+		var err error
+		result, err = b.findEpisodesByStatus(tx, podcastID, filterStatus)
+		return err
+	})
+	return result, err
+}
+
+func (b *BoltDB) findEpisodesByStatus(tx *bolt.Tx, podcastID string, filterStatus podcast.Status) ([]*podcast.Episode, error) {
 	var result []*podcast.Episode
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
@@ -69,7 +93,17 @@ func (b *BoltDB) FindEpisodesByStatus(tx *bolt.Tx, podcastID string, filterStatu
 }
 
 // FindEpisodesBySession get episodes from store by session
-func (b *BoltDB) FindEpisodesBySession(tx *bolt.Tx, podcastID, session string) ([]*podcast.Episode, error) {
+func (b *BoltDB) FindEpisodesBySession(podcastID, session string) ([]*podcast.Episode, error) {
+	var result []*podcast.Episode
+	err := b.WithReadTx(func(tx *bolt.Tx) error {
+		var err error
+		result, err = b.findEpisodesBySession(tx, podcastID, session)
+		return err
+	})
+	return result, err
+}
+
+func (b *BoltDB) findEpisodesBySession(tx *bolt.Tx, podcastID, session string) ([]*podcast.Episode, error) {
 	var result []*podcast.Episode
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
@@ -86,7 +120,6 @@ func (b *BoltDB) FindEpisodesBySession(tx *bolt.Tx, podcastID, session string) (
 		if item.Session != session {
 			continue
 		}
-
 		result = append(result, &item)
 	}
 
@@ -121,7 +154,6 @@ func (b *BoltDB) ChangeStatusEpisodes(podcastID string, fromStatus, toStatus pod
 			if err := bucket.Put(k, jdata); err != nil {
 				return err
 			}
-
 		}
 		return nil
 	})
@@ -130,27 +162,41 @@ func (b *BoltDB) ChangeStatusEpisodes(podcastID string, fromStatus, toStatus pod
 }
 
 // FindEpisodesBySizeLimit get list of episodes with total size limit
-func (b *BoltDB) FindEpisodesBySizeLimit(tx *bolt.Tx, podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
-	episodes, err := b.FindEpisodesByStatus(tx, podcastID, status)
-	if err != nil {
-		log.Printf("[INFO] No episodes in podcast %s", podcastID)
-		return nil, nil
-	}
-	var sizes int64
-	var result = make([]*podcast.Episode, len(episodes))
-	for i, episode := range episodes {
-		if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) >= sizeLimit) {
-			return result[:i], nil
+func (b *BoltDB) FindEpisodesBySizeLimit(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
+	var result []*podcast.Episode
+	err := b.WithReadTx(func(tx *bolt.Tx) error {
+		episodes, err := b.findEpisodesByStatus(tx, podcastID, status)
+		if err != nil {
+			log.Printf("[INFO] No episodes in podcast %s", podcastID)
+			return nil
 		}
-		sizes += episode.Size
-		result[i] = episode
-	}
-
-	return result, nil
+		var sizes int64
+		result = make([]*podcast.Episode, len(episodes))
+		for i, episode := range episodes {
+			if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) >= sizeLimit) {
+				result = result[:i]
+				return nil
+			}
+			sizes += episode.Size
+			result[i] = episode
+		}
+		return nil
+	})
+	return result, err
 }
 
 // GetEpisodeByFilename get episode by filename from store
-func (b *BoltDB) GetEpisodeByFilename(tx *bolt.Tx, podcastID, fileName string) (*podcast.Episode, error) {
+func (b *BoltDB) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episode, error) {
+	var episode *podcast.Episode
+	err := b.WithReadTx(func(tx *bolt.Tx) error {
+		var err error
+		episode, err = b.getEpisodeByFilenameInTx(tx, podcastID, fileName)
+		return err
+	})
+	return episode, err
+}
+
+func (b *BoltDB) getEpisodeByFilenameInTx(tx *bolt.Tx, podcastID, fileName string) (*podcast.Episode, error) {
 	key, err := b.getEpisodeKeyByFilename(fileName)
 	if err != nil {
 		return nil, err
@@ -211,8 +257,17 @@ func (b *BoltDB) GetLastEpisodeByStatus(podcastID string, status podcast.Status)
 }
 
 // GetLastEpisodeByNotStatus get last episode from store by not status
-func (b *BoltDB) GetLastEpisodeByNotStatus(tx *bolt.Tx, podcastID string, status podcast.Status) (*podcast.Episode, error) {
+func (b *BoltDB) GetLastEpisodeByNotStatus(podcastID string, status podcast.Status) (*podcast.Episode, error) {
 	var result *podcast.Episode
+	err := b.WithReadTx(func(tx *bolt.Tx) error {
+		var err error
+		result, err = b.getLastEpisodeByNotStatusInTx(tx, podcastID, status)
+		return err
+	})
+	return result, err
+}
+
+func (b *BoltDB) getLastEpisodeByNotStatusInTx(tx *bolt.Tx, podcastID string, status podcast.Status) (*podcast.Episode, error) {
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
 		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetLastEpisodeByNotStatus", Err: apperrors.ErrNoBucket}
@@ -230,16 +285,10 @@ func (b *BoltDB) GetLastEpisodeByNotStatus(tx *bolt.Tx, podcastID string, status
 			continue
 		}
 
-		result = &item
-		break
+		return &item, nil
 	}
 
-	return result, nil
-}
-
-// CreateTransaction create transaction
-func (b *BoltDB) CreateTransaction() (*bolt.Tx, error) {
-	return b.DB.Begin(true)
+	return nil, nil
 }
 
 func (b *BoltDB) getEpisodeKey(episode *podcast.Episode) ([]byte, error) {

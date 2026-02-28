@@ -141,12 +141,12 @@ complexity: High
 - Modify: `internal/app/podgen/proc/store.go`
 
 **Steps:**
-- [ ] Add sync.Mutex to BoltDB struct
-- [ ] Create WithWriteTx(fn func(*bolt.Tx) error) method
-- [ ] Create WithReadTx(fn func(*bolt.Tx) error) method
-- [ ] Refactor all store methods to use internal transactions
-- [ ] Remove tx parameter from public method signatures
-- [ ] Verify: `go test -race ./...`
+- [x] Add sync.Mutex to BoltDB struct
+- [x] Create WithWriteTx(fn func(*bolt.Tx) error) method
+- [x] Create WithReadTx(fn func(*bolt.Tx) error) method
+- [x] Refactor all store methods to use internal transactions
+- [x] Remove tx parameter from public method signatures
+- [x] Verify: `go test -race ./...`
 
 ### Task 7: Fix BoltDB Thread Safety - App Refactoring
 
