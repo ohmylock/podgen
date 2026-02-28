@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sync"
 
 	log "github.com/go-pkgz/lgr"
 	"podgen/internal/app/podgen/podcast"
@@ -72,48 +71,53 @@ func (p *Processor) DeleteOldEpisodesByPodcast(podcastID, podcastFolder string) 
 	if err != nil {
 		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
-	deleteCh := make(chan DeletedEpisode)
-	done := make(chan bool)
-	wg := sync.WaitGroup{}
+
 	ctx := context.Background()
-	for _, episode := range episodes {
-		wg.Add(1)
 
-		go func(deleteCh chan DeletedEpisode, podcastID string, episodeItem *podcast.Episode) {
-			defer wg.Done()
-			log.Printf("[INFO] Started delete episode %s - %s", podcastID, episodeItem.Filename)
-			err := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
-			if err != nil {
-				log.Printf("[ERROR] can't delete episode %s, %v", episodeItem.Filename, err)
-				return
+	// parallel S3 deletes - track which episodes were successfully deleted
+	type deleteResult struct {
+		filename string
+		ok       bool
+	}
+	results := make([]deleteResult, len(episodes))
+
+	tasks := make([]func(ctx context.Context) error, len(episodes))
+	for i, episode := range episodes {
+		results[i].filename = episode.Filename
+		tasks[i] = func(ctx context.Context) error {
+			log.Printf("[INFO] Started delete episode %s - %s", podcastID, episode.Filename)
+			if err := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episode.Filename)); err != nil {
+				return err
 			}
-
-			log.Printf("[INFO] Episode deleted %s - %s", episodeItem.Filename, podcastID)
-			deleteCh <- DeletedEpisode{PodcastID: podcastID, Filename: episodeItem.Filename}
-		}(deleteCh, podcastID, episode)
+			log.Printf("[INFO] Episode deleted %s - %s", episode.Filename, podcastID)
+			return nil
+		}
 	}
 
-	go func() {
-		wg.Wait()
-		done <- true
-	}()
+	errs := RunParallel(ctx, p.ChunkSize, tasks)
 
-Loop:
-	for {
-		select {
-		case deletedEpisode := <-deleteCh:
-			episode, err := p.Storage.GetEpisodeByFilename(deletedEpisode.PodcastID, deletedEpisode.Filename)
-			if err != nil {
-				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", deletedEpisode.PodcastID, deletedEpisode.Filename, err)
-			}
-			episode.Status = podcast.Deleted
-			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
-				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
-			}
-		case <-done:
-			close(deleteCh)
-			close(done)
-			break Loop
+	// mark successful results
+	for i, err := range errs {
+		if err != nil {
+			log.Printf("[ERROR] can't delete episode %s, %v", results[i].filename, err)
+			continue
+		}
+		results[i].ok = true
+	}
+
+	// sequential DB updates for successfully deleted episodes
+	for _, r := range results {
+		if !r.ok {
+			continue
+		}
+		episode, err := p.Storage.GetEpisodeByFilename(podcastID, r.filename)
+		if err != nil {
+			log.Printf("[ERROR] can't get episode by filename %s - %s, %v", podcastID, r.filename, err)
+			continue
+		}
+		episode.Status = podcast.Deleted
+		if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
+			log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
 		}
 	}
 	return nil
@@ -220,52 +224,48 @@ func (p *Processor) UploadNewEpisodes(session, podcastID, podcastFolder string, 
 		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
-	wg := sync.WaitGroup{}
 	ctx := context.Background()
 
+	// process in chunks - parallel S3 uploads, then sequential DB updates
 	for i := 0; i < len(episodes); i += p.ChunkSize {
-		uploadCh := make(chan UploadedEpisode)
-		done := make(chan bool)
 		end := i + p.ChunkSize
-
 		if end > len(episodes) {
 			end = len(episodes)
 		}
+		chunk := episodes[i:end]
 
-		for _, episode := range episodes[i:end] {
-			wg.Add(1)
-			go func(episode *podcast.Episode) {
-				err := p.uploadProcess(ctx, &wg, uploadCh, podcastID, podcastFolder, episode)
+		// parallel S3 uploads
+		uploadResults := make([]UploadedEpisode, len(chunk))
+		tasks := make([]func(ctx context.Context) error, len(chunk))
+		for j, episode := range chunk {
+			tasks[j] = func(ctx context.Context) error {
+				result, err := p.uploadSingleEpisode(ctx, podcastID, podcastFolder, episode)
 				if err != nil {
-					log.Printf("[ERROR] can't upload episode %s, %v", episode.Filename, err)
+					return err
 				}
-			}(episode)
+				uploadResults[j] = result
+				return nil
+			}
 		}
 
-		go func() {
-			wg.Wait()
-			done <- true
-		}()
+		errs := RunParallel(ctx, p.ChunkSize, tasks)
 
-	Loop:
-		for {
-			select {
-			case uploadedEpisode := <-uploadCh:
-				episode, err := p.Storage.GetEpisodeByFilename(uploadedEpisode.PodcastID, uploadedEpisode.Filename)
-				if err != nil {
-					log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
-					return fmt.Errorf("can't get episode by filename %s, %w", uploadedEpisode.Filename, err)
-				}
-				episode.Session = session
-				episode.Status = podcast.Uploaded
-				episode.Location = uploadedEpisode.Location
-				if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
-					return fmt.Errorf("can't save episode %s, %w", episode.Filename, err)
-				}
-			case <-done:
-				close(uploadCh)
-				close(done)
-				break Loop
+		// sequential DB updates for successful uploads
+		for j, err := range errs {
+			if err != nil {
+				log.Printf("[ERROR] can't upload episode %s, %v", chunk[j].Filename, err)
+				continue
+			}
+			uploaded := uploadResults[j]
+			episode, err := p.Storage.GetEpisodeByFilename(uploaded.PodcastID, uploaded.Filename)
+			if err != nil {
+				return fmt.Errorf("can't get episode by filename %s, %w", uploaded.Filename, err)
+			}
+			episode.Session = session
+			episode.Status = podcast.Uploaded
+			episode.Location = uploaded.Location
+			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
+				return fmt.Errorf("can't save episode %s, %w", episode.Filename, err)
 			}
 		}
 	}
@@ -390,8 +390,7 @@ func (p *Processor) getFeedKey(podcastID string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func (p *Processor) uploadProcess(ctx context.Context, wg *sync.WaitGroup, uploadCh chan UploadedEpisode, podcastID, podcastFolder string, episodeItem *podcast.Episode) error {
-	defer wg.Done()
+func (p *Processor) uploadSingleEpisode(ctx context.Context, podcastID, podcastFolder string, episodeItem *podcast.Episode) (UploadedEpisode, error) {
 	log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
 	objectInfo, _ := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
 	var location string
@@ -404,17 +403,15 @@ func (p *Processor) uploadProcess(ctx context.Context, wg *sync.WaitGroup, uploa
 			fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
 			fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, episodeItem.Filename))
 		if err != nil {
-			return err
+			return UploadedEpisode{}, err
 		}
 		location = uploadInfo.Location
 	}
 
 	log.Printf("[INFO] Episode uploaded %s - %s", episodeItem.Filename, location)
-	uploadCh <- UploadedEpisode{
+	return UploadedEpisode{
 		PodcastID: podcastID,
 		Filename:  episodeItem.Filename,
 		Location:  location,
-	}
-
-	return nil
+	}, nil
 }

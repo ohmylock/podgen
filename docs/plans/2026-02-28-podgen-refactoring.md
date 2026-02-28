@@ -164,13 +164,13 @@ complexity: High
 - Modify: `cmd/podgen/main.go`
 
 **Steps:**
-- [ ] Create worker pool for S3 operations (worker.go)
-- [ ] Refactor Update() - remove tx parameter, sequential iteration
-- [ ] Refactor UploadEpisodes() - sequential DB, parallel S3
-- [ ] Refactor DeleteOldEpisodes() - sequential DB, parallel S3 delete
-- [ ] Refactor GenerateFeed(), RollbackEpisodes(), RollbackEpisodesBySession()
-- [ ] Update main.go - remove CreateTransaction, direct method calls
-- [ ] Verify: `go test -race ./...`
+- [x] Create worker pool for S3 operations (worker.go)
+- [x] Refactor Update() - remove tx parameter, sequential iteration
+- [x] Refactor UploadEpisodes() - sequential DB, parallel S3
+- [x] Refactor DeleteOldEpisodes() - sequential DB, parallel S3 delete
+- [x] Refactor GenerateFeed(), RollbackEpisodes(), RollbackEpisodesBySession()
+- [x] Update main.go - remove CreateTransaction, direct method calls
+- [x] Verify: `go test -race ./...`
 
 ### Task 8: Add Testing Infrastructure with Mocks
 
