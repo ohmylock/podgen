@@ -3,7 +3,7 @@
 GITREV=$(shell git describe --abbrev=0 --always --tags)
 
 build:
-	- GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -v -ldflags="-X main.version=$(GITREV) -s -w" -o ./bin/podgen ./cmd/podgen
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o ./bin/podgen ./cmd/podgen
 
 test:
 	- CGO_ENABLED=0 go test ./...
