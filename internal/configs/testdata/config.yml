@@ -1,0 +1,20 @@
+podcasts:
+  test:
+    title: "test"
+    folder: "test"
+    max_size: 2168208
+
+  demo:
+    title: "demo"
+    folder: "demo"
+
+storage:
+  folder: "storage"
+
+cloud_storage:
+  endpoint_url: "storage_url"
+  bucket: "bucket_name"
+  region: "region-us"
+  secrets:
+    aws_key: "123123123"
+    aws_secret: "abc123123123xyz"
