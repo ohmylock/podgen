@@ -99,12 +99,12 @@ complexity: Medium
 - Modify: `internal/app/podgen/proc/store.go`
 
 **Steps:**
-- [ ] Replace log.Fatalf at line 75 (FindEpisodesBySession)
-- [ ] Replace log.Fatalf at line 100 (ChangeStatusEpisodes)
-- [ ] Replace log.Fatalf at line 188 (GetLastEpisodeByStatus)
-- [ ] Replace log.Fatalf at line 217 (GetLastEpisodeByNotStatus)
-- [ ] Update callers to handle errors
-- [ ] Verify: `go build ./...` and `go vet ./...`
+- [x] Replace log.Fatalf at line 75 (FindEpisodesBySession)
+- [x] Replace log.Fatalf at line 100 (ChangeStatusEpisodes)
+- [x] Replace log.Fatalf at line 188 (GetLastEpisodeByStatus)
+- [x] Replace log.Fatalf at line 217 (GetLastEpisodeByNotStatus)
+- [x] Update callers to handle errors
+- [x] Verify: `go build ./...` and `go vet ./...`
 
 ### Task 5: Replace log.Fatalf in files.go and processor.go
 
@@ -121,11 +121,11 @@ complexity: Medium
 - Modify: `internal/app/podgen/proc/processor.go` (8 calls)
 
 **Steps:**
-- [ ] files.go: Replace log.Fatalf at lines 26, 42
-- [ ] processor.go: Replace log.Fatalf at lines 44, 63, 75, 222, 242, 268, 284, 355-365
-- [ ] Remove unreachable code after fatalf replacements
-- [ ] Update callers to propagate errors
-- [ ] Verify: `go build ./...` and `go vet ./...`
+- [x] files.go: Replace log.Fatalf at lines 26, 42
+- [x] processor.go: Replace log.Fatalf at lines 44, 63, 75, 222, 242, 268, 284, 355-365
+- [x] Remove unreachable code after fatalf replacements
+- [x] Update callers to propagate errors
+- [x] Verify: `go build ./...` and `go vet ./...`
 
 ### Task 6: Fix BoltDB Thread Safety - Store Wrapper
 

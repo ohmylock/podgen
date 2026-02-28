@@ -23,7 +23,6 @@ type Files struct {
 func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 	entities, err := f.scanFolder(folderName)
 	if err != nil {
-		log.Fatalf("[ERROR] can't scan folder %s, %v", folderName, err)
 		return nil, err
 	}
 	var re = regexp.MustCompile(`(?m)([12]\d{3}-(0[1-9]|1[012])-(0[1-9]|[12]\d|3[01]))`)
@@ -39,7 +38,6 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 
 		entityInfo, err := entity.Info()
 		if err != nil {
-			log.Fatalf("[ERROR] can't get file info %s in %s, %v", entity.Name(), folderName, err)
 			return nil, err
 		}
 
