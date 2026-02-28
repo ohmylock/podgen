@@ -5,10 +5,10 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/boltdb/bolt"
 	"os"
 	"sync"
 
+	"github.com/boltdb/bolt"
 	log "github.com/go-pkgz/lgr"
 	"github.com/minio/minio-go/v7"
 	"podgen/internal/app/podgen/podcast"
@@ -262,12 +262,10 @@ func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFo
 				episode.Status = podcast.Uploaded
 				episode.Location = uploadedEpisode.Location
 				if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
-					err := tx.Rollback()
-					if err != nil {
-						log.Printf("[ERROR] can't rollback transaction %v", err)
+					if rollbackErr := tx.Rollback(); rollbackErr != nil {
+						log.Printf("[ERROR] can't rollback transaction %v", rollbackErr)
 					}
 					log.Fatalf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
-					return
 				}
 			case <-done:
 				close(uploadCh)
@@ -390,15 +388,11 @@ func (p *Processor) UploadFeed(podcastFolder, feedName string) *minio.UploadInfo
 }
 
 func (p *Processor) getFeedKey(podcastID string) (string, error) {
-	key, err := func() (string, error) {
-		h := sha256.New()
-		if _, err := h.Write([]byte(podcastID)); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%x", h.Sum(nil)), nil
-	}()
-
-	return key, err
+	h := sha256.New()
+	if _, err := h.Write([]byte(podcastID)); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 func (p *Processor) uploadProcess(ctx context.Context, tx *bolt.Tx, wg *sync.WaitGroup, uploadCh chan UploadedEpisode, podcastID, podcastFolder string, episodeItem *podcast.Episode) error {
@@ -415,9 +409,8 @@ func (p *Processor) uploadProcess(ctx context.Context, tx *bolt.Tx, wg *sync.Wai
 			fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
 			fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, episodeItem.Filename))
 		if err != nil {
-			err := tx.Rollback()
-			if err != nil {
-				log.Printf("[ERROR] can't rollback transaction, %v", err)
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("[ERROR] can't rollback transaction, %v", rollbackErr)
 			}
 			return err
 		}

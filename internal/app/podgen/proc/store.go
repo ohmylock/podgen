@@ -172,9 +172,6 @@ func (b *BoltDB) GetEpisodeByFilename(tx *bolt.Tx, podcastID, fileName string) (
 		return nil, err
 	}
 
-	if err != nil {
-		return nil, err
-	}
 	if episode.Filename == "" {
 		return nil, nil
 	}
