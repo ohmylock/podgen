@@ -8,6 +8,7 @@ import (
 	"github.com/boltdb/bolt"
 	log "github.com/go-pkgz/lgr"
 	"podgen/internal/app/podgen/podcast"
+	apperrors "podgen/internal/errors"
 )
 
 // BoltDB store
@@ -72,7 +73,7 @@ func (b *BoltDB) FindEpisodesBySession(tx *bolt.Tx, podcastID, session string) (
 	var result []*podcast.Episode
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
-		log.Fatalf("no bucket for %s", podcastID)
+		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "FindEpisodesBySession", Err: apperrors.ErrNoBucket}
 	}
 
 	c := bucket.Cursor()
@@ -97,7 +98,7 @@ func (b *BoltDB) ChangeStatusEpisodes(podcastID string, fromStatus, toStatus pod
 	err := b.DB.Batch(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(podcastID))
 		if bucket == nil {
-			log.Fatalf("no bucket for %s", podcastID)
+			return &apperrors.EpisodeError{PodcastID: podcastID, Op: "ChangeStatusEpisodes", Err: apperrors.ErrNoBucket}
 		}
 
 		c := bucket.Cursor()
@@ -185,7 +186,7 @@ func (b *BoltDB) GetLastEpisodeByStatus(podcastID string, status podcast.Status)
 	err := b.DB.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(podcastID))
 		if bucket == nil {
-			log.Fatalf("no bucket for %s", podcastID)
+			return &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetLastEpisodeByStatus", Err: apperrors.ErrNoBucket}
 		}
 
 		c := bucket.Cursor()
@@ -214,7 +215,7 @@ func (b *BoltDB) GetLastEpisodeByNotStatus(tx *bolt.Tx, podcastID string, status
 	var result *podcast.Episode
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
-		log.Fatalf("no bucket for %s", podcastID)
+		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetLastEpisodeByNotStatus", Err: apperrors.ErrNoBucket}
 	}
 
 	c := bucket.Cursor()
