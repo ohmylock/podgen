@@ -189,13 +189,13 @@ complexity: Medium
 - Create: `internal/app/podgen/proc/store_test.go`
 
 **Steps:**
-- [ ] Add moq to go.mod dependencies
-- [ ] Create generate.go with go:generate directives
-- [ ] Run `go generate ./...` to create mocks
-- [ ] Write TestProcessor_Update with table-driven tests
-- [ ] Write TestBoltDB_Integration with temp database
-- [ ] Achieve >60% coverage on processor.go
-- [ ] Verify: `go test -v -cover ./...`
+- [x] Add moq to go.mod dependencies
+- [x] Create generate.go with go:generate directives
+- [x] Run `go generate ./...` to create mocks
+- [x] Write TestProcessor_Update with table-driven tests
+- [x] Write TestBoltDB_Integration with temp database
+- [x] Achieve >60% coverage on processor.go
+- [x] Verify: `go test -v -cover ./...`
 
 ### Task 9: Add Context Support and Graceful Shutdown
 
