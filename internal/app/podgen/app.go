@@ -159,6 +159,7 @@ func (a *App) UploadPodcastImage(podcastIDs string) map[string]string {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	var result = make(map[string]string, len(podcasts))
+	var mu sync.Mutex
 	wg := sync.WaitGroup{}
 	for i, p := range podcasts {
 		wg.Add(1)
@@ -171,7 +172,9 @@ func (a *App) UploadPodcastImage(podcastIDs string) map[string]string {
 				return
 			}
 
+			mu.Lock()
 			result[i] = imageURL
+			mu.Unlock()
 		}(&wg, i, p)
 	}
 
@@ -185,12 +188,16 @@ func (a *App) GetPodcastImages(podcastIDs string) map[string]string {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	var result = make(map[string]string, len(podcasts))
+	var mu sync.Mutex
 	wg := sync.WaitGroup{}
 	for i, p := range podcasts {
 		wg.Add(1)
 		go func(wg *sync.WaitGroup, i string, p configs.Podcast) {
 			defer wg.Done()
-			result[i] = a.processor.GetPodcastImage(p.Folder, podcastDefaultImage)
+			imageURL := a.processor.GetPodcastImage(p.Folder, podcastDefaultImage)
+			mu.Lock()
+			result[i] = imageURL
+			mu.Unlock()
 		}(&wg, i, p)
 	}
 	wg.Wait()

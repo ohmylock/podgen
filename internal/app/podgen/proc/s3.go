@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	log "github.com/go-pkgz/lgr"
 	"github.com/minio/minio-go/v7"
 )
 
@@ -26,16 +25,12 @@ type ObjectInfo struct {
 func (s *S3Store) DeleteEpisode(ctx context.Context, objectName string) error {
 	exists, errBucketExists := s.Client.BucketExists(ctx, s.Bucket)
 	if errBucketExists != nil {
-		log.Fatalf("[ERROR] can't check exists bucket %s, %v", s.Bucket, errBucketExists)
+		return fmt.Errorf("can't check exists bucket %s: %w", s.Bucket, errBucketExists)
 	}
 	if !exists {
 		return nil
 	}
-	err := s.Client.RemoveObject(ctx, s.Bucket, objectName, minio.RemoveObjectOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.Client.RemoveObject(ctx, s.Bucket, objectName, minio.RemoveObjectOptions{})
 }
 
 // UploadEpisode to s3 storage
@@ -56,13 +51,12 @@ func (s *S3Store) UploadFeed(ctx context.Context, objectName, filePath string) (
 func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath, contentType string) (*minio.UploadInfo, error) {
 	exists, errBucketExists := s.Client.BucketExists(ctx, s.Bucket)
 	if errBucketExists != nil {
-		log.Fatalf("[ERROR] can't check exists bucket %s, %v", s.Bucket, errBucketExists)
+		return nil, fmt.Errorf("can't check exists bucket %s: %w", s.Bucket, errBucketExists)
 	}
 
 	if !exists {
-		err := s.Client.MakeBucket(ctx, s.Bucket, minio.MakeBucketOptions{Region: s.Location})
-		if err != nil {
-			log.Fatalf("[ERROR] can't create bucket %s, %v", s.Bucket, errBucketExists)
+		if err := s.Client.MakeBucket(ctx, s.Bucket, minio.MakeBucketOptions{Region: s.Location}); err != nil {
+			return nil, fmt.Errorf("can't create bucket %s: %w", s.Bucket, err)
 		}
 	}
 	uploadInfo, err := s.Client.FPutObject(ctx, s.Bucket, objectName, filePath, minio.PutObjectOptions{ContentType: contentType})
@@ -73,7 +67,7 @@ func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath, contentT
 	if uploadInfo.Location == "" {
 		objectInfo, err := s.GetObjectInfo(ctx, objectName)
 		if err != nil {
-			log.Fatalf("[ERROR] can't get file location %s in bucket %s, %v", objectName, s.Bucket, err)
+			return nil, fmt.Errorf("can't get file location %s in bucket %s: %w", objectName, s.Bucket, err)
 		}
 		uploadInfo.Location = objectInfo.Location
 	}
