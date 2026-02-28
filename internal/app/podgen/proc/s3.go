@@ -15,12 +15,6 @@ type S3Store struct {
 	Bucket   string
 }
 
-// ObjectInfo struct of object in s3 storage
-type ObjectInfo struct {
-	minio.ObjectInfo
-	Location string
-}
-
 // DeleteEpisode from s3 storage
 func (s *S3Store) DeleteEpisode(ctx context.Context, objectName string) error {
 	exists, errBucketExists := s.Client.BucketExists(ctx, s.Bucket)
@@ -34,21 +28,21 @@ func (s *S3Store) DeleteEpisode(ctx context.Context, objectName string) error {
 }
 
 // UploadEpisode to s3 storage
-func (s *S3Store) UploadEpisode(ctx context.Context, objectName, filePath string) (*minio.UploadInfo, error) {
+func (s *S3Store) UploadEpisode(ctx context.Context, objectName, filePath string) (*UploadResult, error) {
 	return s.uploadFile(ctx, objectName, filePath, "audio/mp3")
 }
 
 // UploadImage to s3 storage
-func (s *S3Store) UploadImage(ctx context.Context, objectName, filePath string) (*minio.UploadInfo, error) {
+func (s *S3Store) UploadImage(ctx context.Context, objectName, filePath string) (*UploadResult, error) {
 	return s.uploadFile(ctx, objectName, filePath, "image/png")
 }
 
 // UploadFeed to s3 storage
-func (s *S3Store) UploadFeed(ctx context.Context, objectName, filePath string) (*minio.UploadInfo, error) {
+func (s *S3Store) UploadFeed(ctx context.Context, objectName, filePath string) (*UploadResult, error) {
 	return s.uploadFile(ctx, objectName, filePath, "application/rss+xml")
 }
 
-func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath, contentType string) (*minio.UploadInfo, error) {
+func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath, contentType string) (*UploadResult, error) {
 	exists, errBucketExists := s.Client.BucketExists(ctx, s.Bucket)
 	if errBucketExists != nil {
 		return nil, fmt.Errorf("can't check exists bucket %s: %w", s.Bucket, errBucketExists)
@@ -64,14 +58,15 @@ func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath, contentT
 		return nil, err
 	}
 
-	if uploadInfo.Location == "" {
+	location := uploadInfo.Location
+	if location == "" {
 		objectInfo, err := s.GetObjectInfo(ctx, objectName)
 		if err != nil {
 			return nil, fmt.Errorf("can't get file location %s in bucket %s: %w", objectName, s.Bucket, err)
 		}
-		uploadInfo.Location = objectInfo.Location
+		location = objectInfo.Location
 	}
-	return &uploadInfo, nil
+	return &UploadResult{Location: location}, nil
 }
 
 // GetObjectInfo from object on s3 storage
@@ -84,8 +79,8 @@ func (s *S3Store) GetObjectInfo(ctx context.Context, objectName string) (*Object
 	endpoint := s.Client.EndpointURL()
 
 	objectInfo := ObjectInfo{
-		ObjectInfo: statInfo,
-		Location:   fmt.Sprintf("%s/%s/%s", strings.TrimRight(endpoint.String(), "/"), s.Bucket, statInfo.Key),
+		Location: fmt.Sprintf("%s/%s/%s", strings.TrimRight(endpoint.String(), "/"), s.Bucket, statInfo.Key),
+		Size:     statInfo.Size,
 	}
 
 	return &objectInfo, nil
