@@ -99,7 +99,9 @@ func (a *App) UploadEpisodes(tx *bolt.Tx, podcastIDs string) {
 		wg.Add(1)
 		go func(wg *sync.WaitGroup, i string, session string, p configs.Podcast, tx *bolt.Tx) {
 			defer wg.Done()
-			a.processor.UploadNewEpisodes(tx, session, i, p.Folder, p.MaxSize)
+			if err := a.processor.UploadNewEpisodes(tx, session, i, p.Folder, p.MaxSize); err != nil {
+				log.Printf("[ERROR] can't upload new episodes for %s, %v", i, err)
+			}
 		}(&wg, i, session, p, tx)
 	}
 	wg.Wait()
@@ -121,7 +123,7 @@ func (a *App) DeleteOldEpisodes(tx *bolt.Tx, podcastIDs string) {
 
 			err := a.processor.DeleteOldEpisodesByPodcast(tx, i, p.Folder)
 			if err != nil {
-				log.Fatalf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
+				log.Printf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
 			}
 		}(i, p, tx)
 	}
@@ -145,10 +147,13 @@ func (a *App) GenerateFeed(tx *bolt.Tx, podcastIDs string, podcastImages map[str
 
 			feedFilename, err := a.processor.GenerateFeed(tx, i, p, podcastImageURL)
 			if err != nil {
-				log.Fatalf("%s", err)
+				log.Printf("[ERROR] can't generate feed for %s, %v", i, err)
+				return
 			}
 			uploadInfo := a.processor.UploadFeed(p.Folder, feedFilename)
-			log.Printf("Feed url %s", uploadInfo.Location)
+			if uploadInfo != nil {
+				log.Printf("Feed url %s", uploadInfo.Location)
+			}
 		}(i, p)
 	}
 	wg.Wait()

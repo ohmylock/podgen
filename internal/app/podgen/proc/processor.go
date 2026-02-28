@@ -41,7 +41,6 @@ func (p *Processor) Update(tx *bolt.Tx, folderName, podcastID string) (int64, er
 	var countNew int64
 	episodes, err := p.Files.FindEpisodes(folderName)
 	if err != nil {
-		log.Fatalf("[ERROR] can't scan folder %s, %v", folderName, err)
 		return 0, err
 	}
 
@@ -60,7 +59,7 @@ func (p *Processor) Update(tx *bolt.Tx, folderName, podcastID string) (int64, er
 
 		e := p.Storage.SaveEpisode(tx, podcastID, episode)
 		if e != nil {
-			log.Fatalf("[ERROR] can't add episode %s to %s, %v", episode.Filename, podcastID, e)
+			return 0, fmt.Errorf("can't add episode %s to %s, %w", episode.Filename, podcastID, e)
 		}
 		countNew++
 	}
@@ -72,7 +71,7 @@ func (p *Processor) Update(tx *bolt.Tx, folderName, podcastID string) (int64, er
 func (p *Processor) DeleteOldEpisodesByPodcast(tx *bolt.Tx, podcastID, podcastFolder string) error {
 	episodes, err := p.Storage.FindEpisodesByStatus(tx, podcastID, podcast.Uploaded)
 	if err != nil {
-		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
+		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 	deleteCh := make(chan DeletedEpisode)
 	done := make(chan bool)
@@ -216,10 +215,10 @@ func (p *Processor) GetPodcastImage(podcastFolder, podcastImageFilename string) 
 }
 
 // UploadNewEpisodes get new episodes by total limit of size and upload to s3 storage
-func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFolder string, sizeLimit int64) {
+func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFolder string, sizeLimit int64) error {
 	episodes, err := p.Storage.FindEpisodesBySizeLimit(tx, podcastID, podcast.New, sizeLimit)
 	if err != nil {
-		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
+		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
 	wg := sync.WaitGroup{}
@@ -239,7 +238,7 @@ func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFo
 			go func(episode *podcast.Episode) {
 				err := p.uploadProcess(ctx, tx, &wg, uploadCh, podcastID, podcastFolder, episode)
 				if err != nil {
-					log.Fatalf("[ERROR] can't upload episode %s, %v", episode.Filename, err)
+					log.Printf("[ERROR] can't upload episode %s, %v", episode.Filename, err)
 				}
 			}(episode)
 		}
@@ -256,7 +255,7 @@ func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFo
 				episode, err := p.Storage.GetEpisodeByFilename(tx, uploadedEpisode.PodcastID, uploadedEpisode.Filename)
 				if err != nil {
 					log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
-					return
+					return fmt.Errorf("can't get episode by filename %s, %w", uploadedEpisode.Filename, err)
 				}
 				episode.Session = session
 				episode.Status = podcast.Uploaded
@@ -265,7 +264,7 @@ func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFo
 					if rollbackErr := tx.Rollback(); rollbackErr != nil {
 						log.Printf("[ERROR] can't rollback transaction %v", rollbackErr)
 					}
-					log.Fatalf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+					return fmt.Errorf("can't save episode %s, %w", episode.Filename, err)
 				}
 			case <-done:
 				close(uploadCh)
@@ -274,14 +273,14 @@ func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFo
 			}
 		}
 	}
-
+	return nil
 }
 
 // GenerateFeed to podcast
 func (p *Processor) GenerateFeed(tx *bolt.Tx, podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
 	episodes, err := p.Storage.FindEpisodesByStatus(tx, podcastID, podcast.Uploaded)
 	if err != nil {
-		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
+		return "", fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
 	var header, body, footer string
@@ -352,17 +351,17 @@ func (p *Processor) GenerateFeed(tx *bolt.Tx, podcastID string, podcastEntity co
 
 	feedKey, err := p.getFeedKey(podcastID)
 	if err != nil {
-		log.Fatalf("[ERROR] can't generate feed key for %s, %v", podcastID, err)
+		return "", fmt.Errorf("can't generate feed key for %s, %w", podcastID, err)
 	}
 	feedFilename := fmt.Sprintf("%s.rss", feedKey)
 	feedPath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastEntity.Folder, feedFilename)
 	f, err := os.Create(feedPath) // nolint
 	if err != nil {
-		log.Fatalf("[ERROR] can't create file %s, %v", feedPath, err)
+		return "", fmt.Errorf("can't create file %s, %w", feedPath, err)
 	}
 	defer func(f *os.File) {
 		if err = f.Close(); err != nil {
-			log.Fatalf("[ERROR] can't close file %s, %v", feedPath, err)
+			log.Printf("[ERROR] can't close file %s, %v", feedPath, err)
 		}
 	}(f)
 
