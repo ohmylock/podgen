@@ -3,7 +3,6 @@ package proc
 import (
 	"context"
 
-	"github.com/boltdb/bolt"
 	"podgen/internal/app/podgen/podcast"
 )
 
@@ -20,13 +19,12 @@ type ObjectInfo struct {
 
 // EpisodeStore defines the interface for episode persistence operations.
 type EpisodeStore interface {
-	SaveEpisode(tx *bolt.Tx, podcastID string, episode *podcast.Episode) error
-	FindEpisodesByStatus(tx *bolt.Tx, podcastID string, status podcast.Status) ([]*podcast.Episode, error)
-	FindEpisodesBySession(tx *bolt.Tx, podcastID, session string) ([]*podcast.Episode, error)
-	FindEpisodesBySizeLimit(tx *bolt.Tx, podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error)
-	GetEpisodeByFilename(tx *bolt.Tx, podcastID, fileName string) (*podcast.Episode, error)
-	GetLastEpisodeByNotStatus(tx *bolt.Tx, podcastID string, status podcast.Status) (*podcast.Episode, error)
-	CreateTransaction() (*bolt.Tx, error)
+	SaveEpisode(podcastID string, episode *podcast.Episode) error
+	FindEpisodesByStatus(podcastID string, status podcast.Status) ([]*podcast.Episode, error)
+	FindEpisodesBySession(podcastID, session string) ([]*podcast.Episode, error)
+	FindEpisodesBySizeLimit(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error)
+	GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episode, error)
+	GetLastEpisodeByNotStatus(podcastID string, status podcast.Status) (*podcast.Episode, error)
 }
 
 // ObjectStorage defines the interface for S3-compatible object storage operations.

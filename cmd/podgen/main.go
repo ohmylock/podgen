@@ -118,14 +118,9 @@ func main() {
 	if podcasts == "" {
 		log.Fatalf("[ERROR] You didn't list podcasts")
 	}
-	needCommit := false
-	tx, err := app.CreateTransaction()
-	if err != nil {
-		log.Fatalf("[ERROR] can't create transaction, %v", err)
-	}
 
 	if opts.Scan {
-		app.Update(tx, podcasts)
+		app.Update(podcasts)
 	}
 
 	var images map[string]string
@@ -135,31 +130,21 @@ func main() {
 	}
 
 	if opts.Rollback {
-		app.RollbackEpisodes(tx, podcasts)
-		needCommit = true
+		app.RollbackEpisodes(podcasts)
 	} else if opts.RollbackBySession != "" {
-		app.RollbackEpisodesBySession(tx, podcasts, opts.RollbackBySession)
-		needCommit = true
+		app.RollbackEpisodesBySession(podcasts, opts.RollbackBySession)
 	}
 
 	if opts.Upload {
-		app.DeleteOldEpisodes(tx, podcasts)
-		app.UploadEpisodes(tx, podcasts)
+		app.DeleteOldEpisodes(podcasts)
+		app.UploadEpisodes(podcasts)
 		opts.UpdateFeed = true
-		needCommit = true
 	}
 
 	if opts.UpdateFeed {
 		if images == nil {
 			images = app.GetPodcastImages(podcasts)
 		}
-		app.GenerateFeed(tx, podcasts, images)
-	}
-
-	if needCommit {
-		err = tx.Commit()
-		if err != nil {
-			log.Fatalf("[ERROR] can't commit transaction, %v", err)
-		}
+		app.GenerateFeed(podcasts, images)
 	}
 }
