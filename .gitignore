@@ -17,3 +17,6 @@
 !/var/.gitkeep
 
 dist/
+/docs/plans/
+/podgen
+/.claude/
