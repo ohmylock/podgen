@@ -10,17 +10,17 @@ import (
 
 	"github.com/boltdb/bolt"
 	log "github.com/go-pkgz/lgr"
-	"github.com/minio/minio-go/v7"
 	"podgen/internal/app/podgen/podcast"
 	"podgen/internal/configs"
 )
 
 // Processor is searcher of episode files and writer to store
 type Processor struct {
-	Storage   *BoltDB
-	Files     *Files
-	S3Client  *S3Store
-	ChunkSize int
+	Storage     EpisodeStore
+	Files       FileScanner
+	S3Client    ObjectStorage
+	StoragePath string
+	ChunkSize   int
 }
 
 // UploadedEpisode struct for result of upload
@@ -180,9 +180,9 @@ func (p *Processor) UploadPodcastImage(podcastID, podcastFolder, podcastImageFil
 	log.Printf("[INFO] Started upload podcast image %s - %s", podcastID, podcastImageFilename)
 	ctx := context.Background()
 
-	podcastImagePath := fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, podcastImageFilename)
+	podcastImagePath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, podcastImageFilename)
 	if !CheckFileExists(podcastImagePath) {
-		podcastImagePath = fmt.Sprintf("%s/%s", p.Files.Storage, podcastImageFilename)
+		podcastImagePath = fmt.Sprintf("%s/%s", p.StoragePath, podcastImageFilename)
 	}
 
 	if !CheckFileExists(podcastImagePath) {
@@ -355,7 +355,7 @@ func (p *Processor) GenerateFeed(tx *bolt.Tx, podcastID string, podcastEntity co
 		log.Fatalf("[ERROR] can't generate feed key for %s, %v", podcastID, err)
 	}
 	feedFilename := fmt.Sprintf("%s.rss", feedKey)
-	feedPath := fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastEntity.Folder, feedFilename)
+	feedPath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastEntity.Folder, feedFilename)
 	f, err := os.Create(feedPath) // nolint
 	if err != nil {
 		log.Fatalf("[ERROR] can't create file %s, %v", feedPath, err)
@@ -374,10 +374,10 @@ func (p *Processor) GenerateFeed(tx *bolt.Tx, podcastID string, podcastEntity co
 }
 
 // UploadFeed of podcast to s3 storage
-func (p *Processor) UploadFeed(podcastFolder, feedName string) *minio.UploadInfo {
+func (p *Processor) UploadFeed(podcastFolder, feedName string) *UploadResult {
 	uploadInfo, err := p.S3Client.UploadFeed(context.Background(),
 		fmt.Sprintf("%s/%s", podcastFolder, feedName),
-		fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, feedName))
+		fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, feedName))
 
 	if err != nil {
 		log.Printf("[ERROR] can't upload feed %s, %v", feedName, err)
@@ -407,7 +407,7 @@ func (p *Processor) uploadProcess(ctx context.Context, tx *bolt.Tx, wg *sync.Wai
 	if location == "" {
 		uploadInfo, err := p.S3Client.UploadEpisode(ctx,
 			fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
-			fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, episodeItem.Filename))
+			fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, episodeItem.Filename))
 		if err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("[ERROR] can't rollback transaction, %v", rollbackErr)
