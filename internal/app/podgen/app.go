@@ -2,6 +2,7 @@
 package podgen
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"os"
@@ -62,11 +63,11 @@ func NewS3Client(endpoint, accessKeyID, secretAccessKey string, useSSL bool) (*m
 }
 
 // Update find and add to db new episodes of podcast
-func (a *App) Update(podcastIDs string) {
+func (a *App) Update(ctx context.Context, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	for i, p := range podcasts {
-		countNew, err := a.processor.Update(p.Folder, i)
+		countNew, err := a.processor.Update(ctx, p.Folder, i)
 		if err != nil {
 			log.Printf("[ERROR] can't update folder %s, %v", p.Folder, err)
 			continue
@@ -78,7 +79,7 @@ func (a *App) Update(podcastIDs string) {
 }
 
 // UploadEpisodes by podcasts to s3 storage
-func (a *App) UploadEpisodes(podcastIDs string) {
+func (a *App) UploadEpisodes(ctx context.Context, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	session, err := a.makeSessionString()
@@ -90,14 +91,14 @@ func (a *App) UploadEpisodes(podcastIDs string) {
 	log.Printf("[INFO] Start session: %s", session)
 
 	for i, p := range podcasts {
-		if err := a.processor.UploadNewEpisodes(session, i, p.Folder, p.MaxSize); err != nil {
+		if err := a.processor.UploadNewEpisodes(ctx, session, i, p.Folder, p.MaxSize); err != nil {
 			log.Printf("[ERROR] can't upload new episodes for %s, %v", i, err)
 		}
 	}
 }
 
 // DeleteOldEpisodes delete old episodes by podcasts
-func (a *App) DeleteOldEpisodes(podcastIDs string) {
+func (a *App) DeleteOldEpisodes(ctx context.Context, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	for i, p := range podcasts {
@@ -105,7 +106,7 @@ func (a *App) DeleteOldEpisodes(podcastIDs string) {
 			continue
 		}
 
-		err := a.processor.DeleteOldEpisodesByPodcast(i, p.Folder)
+		err := a.processor.DeleteOldEpisodesByPodcast(ctx, i, p.Folder)
 		if err != nil {
 			log.Printf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
 		}
@@ -113,18 +114,18 @@ func (a *App) DeleteOldEpisodes(podcastIDs string) {
 }
 
 // GenerateFeed for podcasts
-func (a *App) GenerateFeed(podcastIDs string, podcastImages map[string]string) {
+func (a *App) GenerateFeed(ctx context.Context, podcastIDs string, podcastImages map[string]string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	for i, p := range podcasts {
 		podcastImageURL := podcastImages[i]
 
-		feedFilename, err := a.processor.GenerateFeed(i, p, podcastImageURL)
+		feedFilename, err := a.processor.GenerateFeed(ctx, i, p, podcastImageURL)
 		if err != nil {
 			log.Printf("[ERROR] can't generate feed for %s, %v", i, err)
 			continue
 		}
-		uploadInfo := a.processor.UploadFeed(p.Folder, feedFilename)
+		uploadInfo := a.processor.UploadFeed(ctx, p.Folder, feedFilename)
 		if uploadInfo != nil {
 			log.Printf("Feed url %s", uploadInfo.Location)
 		}
@@ -132,12 +133,12 @@ func (a *App) GenerateFeed(podcastIDs string, podcastImages map[string]string) {
 }
 
 // UploadPodcastImage by podcast to s3 storage
-func (a *App) UploadPodcastImage(podcastIDs string) map[string]string {
+func (a *App) UploadPodcastImage(ctx context.Context, podcastIDs string) map[string]string {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	result := make(map[string]string, len(podcasts))
 	for i, p := range podcasts {
-		imageURL, err := a.processor.UploadPodcastImage(i, p.Folder, podcastDefaultImage)
+		imageURL, err := a.processor.UploadPodcastImage(ctx, i, p.Folder, podcastDefaultImage)
 		if err != nil {
 			log.Printf("[ERROR] can't upload podcast image %s, %v", podcastDefaultImage, err)
 			continue
@@ -149,12 +150,12 @@ func (a *App) UploadPodcastImage(podcastIDs string) map[string]string {
 }
 
 // GetPodcastImages by podcast from s3 storage
-func (a *App) GetPodcastImages(podcastIDs string) map[string]string {
+func (a *App) GetPodcastImages(ctx context.Context, podcastIDs string) map[string]string {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	result := make(map[string]string, len(podcasts))
 	for i, p := range podcasts {
-		imageURL := a.processor.GetPodcastImage(p.Folder, podcastDefaultImage)
+		imageURL := a.processor.GetPodcastImage(ctx, p.Folder, podcastDefaultImage)
 		result[i] = imageURL
 	}
 
@@ -167,11 +168,11 @@ func (a *App) FindPodcasts() map[string]configs.Podcast {
 }
 
 // RollbackEpisodes rollback last episode by podcasts
-func (a *App) RollbackEpisodes(podcastIDs string) {
+func (a *App) RollbackEpisodes(ctx context.Context, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	for i := range podcasts {
-		err := a.processor.RollbackLastEpisodes(i)
+		err := a.processor.RollbackLastEpisodes(ctx, i)
 		if err != nil {
 			log.Printf("[ERROR] can't rollback episode by podcast %s, %v", i, err)
 		}
@@ -179,11 +180,11 @@ func (a *App) RollbackEpisodes(podcastIDs string) {
 }
 
 // RollbackEpisodesBySession rollback episodes by podcasts and session
-func (a *App) RollbackEpisodesBySession(podcastIDs, session string) {
+func (a *App) RollbackEpisodesBySession(ctx context.Context, podcastIDs, session string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	for i := range podcasts {
-		err := a.processor.RollbackEpisodesOfSession(i, session)
+		err := a.processor.RollbackEpisodesOfSession(ctx, i, session)
 		if err != nil {
 			log.Printf("[ERROR] can't rollback episode by podcast %s, %v", i, err)
 		}

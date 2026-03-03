@@ -35,7 +35,7 @@ type DeletedEpisode struct {
 }
 
 // Update podcast files
-func (p *Processor) Update(folderName, podcastID string) (int64, error) {
+func (p *Processor) Update(ctx context.Context, folderName, podcastID string) (int64, error) {
 	var countNew int64
 	episodes, err := p.Files.FindEpisodes(folderName)
 	if err != nil {
@@ -43,6 +43,12 @@ func (p *Processor) Update(folderName, podcastID string) (int64, error) {
 	}
 
 	for _, episode := range episodes {
+		select {
+		case <-ctx.Done():
+			return countNew, ctx.Err()
+		default:
+		}
+
 		if episode == nil {
 			continue
 		}
@@ -66,13 +72,11 @@ func (p *Processor) Update(folderName, podcastID string) (int64, error) {
 }
 
 // DeleteOldEpisodesByPodcast from s3 storage
-func (p *Processor) DeleteOldEpisodesByPodcast(podcastID, podcastFolder string) error {
+func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, podcastFolder string) error {
 	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
 	if err != nil {
 		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
-
-	ctx := context.Background()
 
 	// parallel S3 deletes - track which episodes were successfully deleted
 	type deleteResult struct {
@@ -124,7 +128,7 @@ func (p *Processor) DeleteOldEpisodesByPodcast(podcastID, podcastFolder string) 
 }
 
 // RollbackLastEpisodes last deleted episode
-func (p *Processor) RollbackLastEpisodes(podcastID string) error {
+func (p *Processor) RollbackLastEpisodes(ctx context.Context, podcastID string) error {
 	episode, err := p.Storage.GetLastEpisodeByNotStatus(podcastID, podcast.New)
 	if err != nil {
 		log.Printf("[ERROR] can't find episodes %s, %v", podcastID, err)
@@ -137,7 +141,7 @@ func (p *Processor) RollbackLastEpisodes(podcastID string) error {
 	}
 
 	if episode.Session != "" {
-		return p.RollbackEpisodesOfSession(podcastID, episode.Session)
+		return p.RollbackEpisodesOfSession(ctx, podcastID, episode.Session)
 	}
 
 	episode.Status = podcast.New
@@ -150,7 +154,7 @@ func (p *Processor) RollbackLastEpisodes(podcastID string) error {
 }
 
 // RollbackEpisodesOfSession last deleted episode of session
-func (p *Processor) RollbackEpisodesOfSession(podcastID, session string) error {
+func (p *Processor) RollbackEpisodesOfSession(ctx context.Context, podcastID, session string) error {
 	episodes, err := p.Storage.FindEpisodesBySession(podcastID, session)
 	if err != nil {
 		log.Printf("[ERROR] can't find episodes %s, %v", podcastID, err)
@@ -165,6 +169,12 @@ func (p *Processor) RollbackEpisodesOfSession(podcastID, session string) error {
 	log.Printf("[INFO] Started rollback episodes %s", podcastID)
 
 	for _, episode := range episodes {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		episode.Status = podcast.New
 		if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
 			log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
@@ -178,9 +188,8 @@ func (p *Processor) RollbackEpisodesOfSession(podcastID, session string) error {
 }
 
 // UploadPodcastImage to s3 storage
-func (p *Processor) UploadPodcastImage(podcastID, podcastFolder, podcastImageFilename string) (string, error) {
+func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFolder, podcastImageFilename string) (string, error) {
 	log.Printf("[INFO] Started upload podcast image %s - %s", podcastID, podcastImageFilename)
-	ctx := context.Background()
 
 	podcastImagePath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, podcastImageFilename)
 	if !CheckFileExists(podcastImagePath) {
@@ -205,9 +214,7 @@ func (p *Processor) UploadPodcastImage(podcastID, podcastFolder, podcastImageFil
 }
 
 // GetPodcastImage from s3 storage
-func (p *Processor) GetPodcastImage(podcastFolder, podcastImageFilename string) string {
-	ctx := context.Background()
-
+func (p *Processor) GetPodcastImage(ctx context.Context, podcastFolder, podcastImageFilename string) string {
 	imageInfo, err := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, podcastImageFilename))
 
 	if err != nil {
@@ -218,16 +225,20 @@ func (p *Processor) GetPodcastImage(podcastFolder, podcastImageFilename string) 
 }
 
 // UploadNewEpisodes get new episodes by total limit of size and upload to s3 storage
-func (p *Processor) UploadNewEpisodes(session, podcastID, podcastFolder string, sizeLimit int64) error {
+func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, podcastFolder string, sizeLimit int64) error {
 	episodes, err := p.Storage.FindEpisodesBySizeLimit(podcastID, podcast.New, sizeLimit)
 	if err != nil {
 		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
-	ctx := context.Background()
-
 	// process in chunks - parallel S3 uploads, then sequential DB updates
 	for i := 0; i < len(episodes); i += p.ChunkSize {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		end := i + p.ChunkSize
 		if end > len(episodes) {
 			end = len(episodes)
@@ -273,7 +284,7 @@ func (p *Processor) UploadNewEpisodes(session, podcastID, podcastFolder string, 
 }
 
 // GenerateFeed to podcast
-func (p *Processor) GenerateFeed(podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
+func (p *Processor) GenerateFeed(ctx context.Context, podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
 	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
 	if err != nil {
 		return "", fmt.Errorf("can't find episodes %s, %w", podcastID, err)
@@ -369,8 +380,8 @@ func (p *Processor) GenerateFeed(podcastID string, podcastEntity configs.Podcast
 }
 
 // UploadFeed of podcast to s3 storage
-func (p *Processor) UploadFeed(podcastFolder, feedName string) *UploadResult {
-	uploadInfo, err := p.S3Client.UploadFeed(context.Background(),
+func (p *Processor) UploadFeed(ctx context.Context, podcastFolder, feedName string) *UploadResult {
+	uploadInfo, err := p.S3Client.UploadFeed(ctx,
 		fmt.Sprintf("%s/%s", podcastFolder, feedName),
 		fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, feedName))
 

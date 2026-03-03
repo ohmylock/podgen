@@ -20,3 +20,5 @@ dist/
 /docs/plans/
 /podgen
 /.claude/
+# ralphex progress logs
+progress*.txt

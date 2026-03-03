@@ -2,9 +2,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/jessevdk/go-flags"
 	"podgen/internal/app/podgen"
@@ -30,6 +33,9 @@ var version string
 
 func main() {
 	fmt.Printf("podgen %s\n", version)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	p := flags.NewParser(&opts, flags.PassDoubleDash|flags.HelpFlag)
 	if _, err := p.Parse(); err != nil {
@@ -120,31 +126,31 @@ func main() {
 	}
 
 	if opts.Scan {
-		app.Update(podcasts)
+		app.Update(ctx, podcasts)
 	}
 
 	var images map[string]string
 
 	if opts.UpdateImage {
-		images = app.UploadPodcastImage(podcasts)
+		images = app.UploadPodcastImage(ctx, podcasts)
 	}
 
 	if opts.Rollback {
-		app.RollbackEpisodes(podcasts)
+		app.RollbackEpisodes(ctx, podcasts)
 	} else if opts.RollbackBySession != "" {
-		app.RollbackEpisodesBySession(podcasts, opts.RollbackBySession)
+		app.RollbackEpisodesBySession(ctx, podcasts, opts.RollbackBySession)
 	}
 
 	if opts.Upload {
-		app.DeleteOldEpisodes(podcasts)
-		app.UploadEpisodes(podcasts)
+		app.DeleteOldEpisodes(ctx, podcasts)
+		app.UploadEpisodes(ctx, podcasts)
 		opts.UpdateFeed = true
 	}
 
 	if opts.UpdateFeed {
 		if images == nil {
-			images = app.GetPodcastImages(podcasts)
+			images = app.GetPodcastImages(ctx, podcasts)
 		}
-		app.GenerateFeed(podcasts, images)
+		app.GenerateFeed(ctx, podcasts, images)
 	}
 }
