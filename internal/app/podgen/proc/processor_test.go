@@ -120,7 +120,7 @@ func TestProcessor_Update(t *testing.T) {
 				Files:   scanner,
 			}
 
-			count, err := p.Update(tt.folderName, tt.podcastID)
+			count, err := p.Update(context.Background(), tt.folderName, tt.podcastID)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.wantErrContain != "" {
@@ -207,7 +207,7 @@ func TestProcessor_DeleteOldEpisodesByPodcast(t *testing.T) {
 				ChunkSize: 2,
 			}
 
-			err := p.DeleteOldEpisodesByPodcast(tt.podcastID, tt.podcastFolder)
+			err := p.DeleteOldEpisodesByPodcast(context.Background(), tt.podcastID, tt.podcastFolder)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -272,7 +272,7 @@ func TestProcessor_RollbackLastEpisodes(t *testing.T) {
 
 			p := &proc.Processor{Storage: store}
 
-			err := p.RollbackLastEpisodes(tt.podcastID)
+			err := p.RollbackLastEpisodes(context.Background(), tt.podcastID)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -345,7 +345,7 @@ func TestProcessor_RollbackEpisodesOfSession(t *testing.T) {
 
 			p := &proc.Processor{Storage: store}
 
-			err := p.RollbackEpisodesOfSession(tt.podcastID, tt.session)
+			err := p.RollbackEpisodesOfSession(context.Background(), tt.podcastID, tt.session)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -434,7 +434,7 @@ func TestProcessor_UploadNewEpisodes(t *testing.T) {
 				ChunkSize:   2,
 			}
 
-			err := p.UploadNewEpisodes(tt.session, tt.podcastID, tt.podcastFolder, tt.sizeLimit)
+			err := p.UploadNewEpisodes(context.Background(), tt.session, tt.podcastID, tt.podcastFolder, tt.sizeLimit)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -478,7 +478,7 @@ func TestProcessor_GetPodcastImage(t *testing.T) {
 			}
 
 			p := &proc.Processor{S3Client: s3}
-			result := p.GetPodcastImage(tt.folder, tt.imageFile)
+			result := p.GetPodcastImage(context.Background(), tt.folder, tt.imageFile)
 			assert.Equal(t, tt.wantLocation, result)
 		})
 	}
@@ -521,7 +521,7 @@ func TestProcessor_UploadFeed(t *testing.T) {
 				StoragePath: "/tmp/storage",
 			}
 
-			result := p.UploadFeed(tt.folder, tt.feedName)
+			result := p.UploadFeed(context.Background(), tt.folder, tt.feedName)
 			if tt.wantNil {
 				assert.Nil(t, result)
 			} else {
@@ -541,7 +541,7 @@ func TestProcessor_GenerateFeed(t *testing.T) {
 		}
 
 		p := &proc.Processor{Storage: store}
-		_, err := p.GenerateFeed("pod1", configs.Podcast{Title: "Test"}, "https://img.png")
+		_, err := p.GenerateFeed(context.Background(), "pod1", configs.Podcast{Title: "Test"}, "https://img.png")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "can't find episodes")
 	})
