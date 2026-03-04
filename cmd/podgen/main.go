@@ -45,18 +45,18 @@ func isTerminal(f *os.File) bool {
 func main() {
 	fmt.Printf("podgen %s\n", version)
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
 	p := flags.NewParser(&opts, flags.PassDoubleDash|flags.HelpFlag)
-	if _, err := p.Parse(); err != nil {
+	_, err := p.Parse()
+	if err != nil {
 		if flagErr, ok := err.(*flags.Error); ok && flagErr.Type == flags.ErrHelp {
 			p.WriteHelp(os.Stderr)
-			os.Exit(0)
+			return
 		}
-		fmt.Printf("%v\n", err)
-		os.Exit(1)
+		log.Fatalf("[ERROR] %v", err)
 	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	configFile := opts.Conf
 	if !proc.CheckFileExists(configFile) {

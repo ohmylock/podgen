@@ -1,7 +1,6 @@
 package podgen
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func TestNewBoltDB(t *testing.T) {
-	tmpFile, _ := ioutil.TempFile("", "")
+	tmpFile, _ := os.CreateTemp("", "")
 	defer func(name string) {
 		err := os.Remove(name)
 		if err != nil {

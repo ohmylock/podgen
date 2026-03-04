@@ -319,7 +319,7 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 }
 
 // GenerateFeed to podcast
-func (p *Processor) GenerateFeed(ctx context.Context, podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
+func (p *Processor) GenerateFeed(_ context.Context, podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
 	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
 	if err != nil {
 		return "", fmt.Errorf("can't find episodes %s, %w", podcastID, err)
@@ -416,7 +416,7 @@ func (p *Processor) GenerateFeed(ctx context.Context, podcastID string, podcastE
 		}
 	}(f)
 
-	if _, err = f.WriteString(fmt.Sprintf("%s\n%s\n%s", header, body, footer)); err != nil {
+	if _, err = fmt.Fprintf(f, "%s\n%s\n%s", header, body, footer); err != nil {
 		return "", fmt.Errorf("[ERROR] can't write to file %s, %v", feedPath, err)
 	}
 
@@ -460,17 +460,18 @@ func BuildItemDescription(episode *podcast.Episode) string {
 	var parts []string
 
 	var line1 string
-	if episode.Artist != "" && episode.Album != "" && episode.Year != "" {
+	switch {
+	case episode.Artist != "" && episode.Album != "" && episode.Year != "":
 		line1 = fmt.Sprintf("%s - %s (%s)", episode.Artist, episode.Album, episode.Year)
-	} else if episode.Artist != "" && episode.Album != "" {
+	case episode.Artist != "" && episode.Album != "":
 		line1 = fmt.Sprintf("%s - %s", episode.Artist, episode.Album)
-	} else if episode.Artist != "" {
+	case episode.Artist != "":
 		line1 = episode.Artist
-	} else if episode.Album != "" && episode.Year != "" {
+	case episode.Album != "" && episode.Year != "":
 		line1 = fmt.Sprintf("%s (%s)", episode.Album, episode.Year)
-	} else if episode.Album != "" {
+	case episode.Album != "":
 		line1 = episode.Album
-	} else if episode.Year != "" {
+	case episode.Year != "":
 		line1 = episode.Year
 	}
 

@@ -167,7 +167,7 @@ func (b *BoltDB) FindEpisodesBySizeLimit(podcastID string, status podcast.Status
 	err := b.WithReadTx(func(tx *bolt.Tx) error {
 		episodes, err := b.findEpisodesByStatus(tx, podcastID, status)
 		if err != nil {
-			log.Printf("[INFO] No episodes in podcast %s", podcastID)
+			log.Printf("[INFO] No episodes with status %d in podcast %s: %v", status, podcastID, err)
 			return nil
 		}
 		var sizes int64

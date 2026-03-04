@@ -1,3 +1,4 @@
+// Package errors provides common error types and utilities for the podgen application.
 package errors
 
 import (
