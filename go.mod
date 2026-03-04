@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	github.com/bogem/id3v2/v2 v2.1.4 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/google/uuid v1.1.2 // indirect
