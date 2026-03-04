@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"podgen/internal/app/podgen/podcast"
+	"podgen/internal/storage"
 )
 
 // UploadResult holds the result of an S3 upload operation.
@@ -17,15 +18,9 @@ type ObjectInfo struct {
 	Size     int64
 }
 
-// EpisodeStore defines the interface for episode persistence operations.
-type EpisodeStore interface {
-	SaveEpisode(podcastID string, episode *podcast.Episode) error
-	FindEpisodesByStatus(podcastID string, status podcast.Status) ([]*podcast.Episode, error)
-	FindEpisodesBySession(podcastID, session string) ([]*podcast.Episode, error)
-	FindEpisodesBySizeLimit(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error)
-	GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episode, error)
-	GetLastEpisodeByNotStatus(podcastID string, status podcast.Status) (*podcast.Episode, error)
-}
+// EpisodeStore is an alias for storage.EpisodeStore for backward compatibility.
+// New code should use storage.EpisodeStore directly.
+type EpisodeStore = storage.EpisodeStore
 
 // ObjectStorage defines the interface for S3-compatible object storage operations.
 type ObjectStorage interface {
