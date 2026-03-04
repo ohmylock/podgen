@@ -275,7 +275,7 @@ func (s *Store) getEpisodeByFilenameInTx(tx *bolt.Tx, podcastID, fileName string
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
 		log.Printf("[WARN] no bucket for %s", podcastID)
-		return nil, fmt.Errorf("no bucket for %s", podcastID)
+		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetEpisodeByFilename", Err: apperrors.ErrNoBucket}
 	}
 
 	item := bucket.Get(key)
