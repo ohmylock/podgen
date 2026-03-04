@@ -3,6 +3,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -246,9 +247,12 @@ func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status,
 	// First get episodes by status
 	episodes, err := s.FindEpisodesByStatus(podcastID, status)
 	if err != nil {
-		// Don't propagate not found errors, just return empty
-		log.Printf("[INFO] No episodes with status %d in podcast %s: %v", status, podcastID, err)
-		return nil, nil
+		// Only swallow ErrNoBucket, propagate other errors
+		var epErr *apperrors.EpisodeError
+		if errors.As(err, &epErr) && errors.Is(epErr.Err, apperrors.ErrNoBucket) {
+			return nil, nil
+		}
+		return nil, err
 	}
 
 	if sizeLimit <= 0 {
@@ -281,7 +285,7 @@ func (s *Store) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episo
 		return nil, err
 	}
 	if !exists {
-		return nil, fmt.Errorf("no bucket for %s", podcastID)
+		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetEpisodeByFilename", Err: apperrors.ErrNoBucket}
 	}
 
 	query := `

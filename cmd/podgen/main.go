@@ -104,6 +104,10 @@ func loadConfig() *configs.Conf {
 		log.Fatalf("[ERROR] can't load config %s, %v", opts.Conf, err)
 	}
 
+	if err := conf.Validate(); err != nil {
+		log.Fatalf("[ERROR] invalid config: %v", err)
+	}
+
 	if !proc.CheckFileExists(conf.Storage.Folder) {
 		log.Fatal("[ERROR] storage folder not found")
 	}
