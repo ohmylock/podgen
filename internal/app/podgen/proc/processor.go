@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	log "github.com/go-pkgz/lgr"
 	"podgen/internal/app/podgen/podcast"
@@ -378,16 +379,25 @@ func (p *Processor) GenerateFeed(ctx context.Context, podcastID string, podcastE
 
 	footer = "</channel>\n</rss>"
 	for _, episode := range episodes {
-		body += "<item>\n" +
-			fmt.Sprintf("<title>%s</title>\n", episode.Filename) +
-			fmt.Sprintf("<description><![CDATA[%s]]></description>\n", episode.Filename) +
-			fmt.Sprintf("<itunes:summary><![CDATA[%s]]></itunes:summary>\n", episode.Filename) +
+		title := episode.Title
+		if title == "" {
+			title = episode.Filename
+		}
+		desc := BuildItemDescription(episode)
+		item := "<item>\n" +
+			fmt.Sprintf("<title>%s</title>\n", title) +
+			fmt.Sprintf("<description><![CDATA[%s]]></description>\n", desc) +
+			fmt.Sprintf("<itunes:summary><![CDATA[%s]]></itunes:summary>\n", desc) +
 			fmt.Sprintf("<pubDate>%s</pubDate>\n", episode.PubDate) +
 			fmt.Sprintf("<itunes:image href=%q />\n", podcastImageURL) +
 			fmt.Sprintf("<enclosure url=%q type=\"audio/mp3\" length=\"%d\" />\n", episode.Location, episode.Size) +
 			fmt.Sprintf("<media:content url=%q fileSize=\"%d\" type=\"audio/mp3\" />\n", episode.Location, episode.Size) +
-			"<itunes:explicit>No</itunes:explicit>\n" +
-			"</item>\n"
+			"<itunes:explicit>No</itunes:explicit>\n"
+		if episode.Duration != "" {
+			item += fmt.Sprintf("<itunes:duration>%s</itunes:duration>\n", episode.Duration)
+		}
+		item += "</item>\n"
+		body += item
 	}
 
 	feedKey, err := p.getFeedKey(podcastID)
@@ -442,6 +452,39 @@ func (p *Processor) GetFeedURL(podcastID, podcastFolder, baseURL, bucket string)
 		return "", err
 	}
 	return fmt.Sprintf("https://%s/%s/%s/%s.rss", baseURL, bucket, podcastFolder, feedKey), nil
+}
+
+// BuildItemDescription builds an RSS item description from episode metadata.
+// Format: "Artist - Album (Year)\nComment", falling back to filename if all metadata is empty.
+func BuildItemDescription(episode *podcast.Episode) string {
+	var parts []string
+
+	var line1 string
+	if episode.Artist != "" && episode.Album != "" && episode.Year != "" {
+		line1 = fmt.Sprintf("%s - %s (%s)", episode.Artist, episode.Album, episode.Year)
+	} else if episode.Artist != "" && episode.Album != "" {
+		line1 = fmt.Sprintf("%s - %s", episode.Artist, episode.Album)
+	} else if episode.Artist != "" {
+		line1 = episode.Artist
+	} else if episode.Album != "" && episode.Year != "" {
+		line1 = fmt.Sprintf("%s (%s)", episode.Album, episode.Year)
+	} else if episode.Album != "" {
+		line1 = episode.Album
+	} else if episode.Year != "" {
+		line1 = episode.Year
+	}
+
+	if line1 != "" {
+		parts = append(parts, line1)
+	}
+	if episode.Comment != "" {
+		parts = append(parts, episode.Comment)
+	}
+
+	if len(parts) == 0 {
+		return episode.Filename
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (p *Processor) uploadSingleEpisode(ctx context.Context, podcastID, podcastFolder string, episodeItem *podcast.Episode) (UploadedEpisode, error) {

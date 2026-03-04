@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -699,4 +701,177 @@ func TestProcessor_GenerateFeed(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "can't find episodes")
 	})
+
+	t.Run("episode with full metadata uses title and metadata description", func(t *testing.T) {
+		dir := t.TempDir()
+		episodes := []*podcast.Episode{
+			{
+				Filename: "2024-01-01-ep1.mp3",
+				PubDate:  "Mon, 01 Jan 2024 00:00:00 +0000",
+				Size:     1000,
+				Status:   podcast.Uploaded,
+				Location: "https://s3/ep1.mp3",
+				Title:    "My Episode Title",
+				Artist:   "Test Artist",
+				Album:    "Test Album",
+				Year:     "2024",
+				Comment:  "Episode comment",
+				Duration: "01:23:45",
+			},
+		}
+
+		store := &mocks.EpisodeStoreMock{
+			FindEpisodesByStatusFunc: func(podcastID string, status podcast.Status) ([]*podcast.Episode, error) {
+				return episodes, nil
+			},
+		}
+
+		p := &proc.Processor{Storage: store, StoragePath: dir}
+		podcastEntity := configs.Podcast{
+			Title:  "My Podcast",
+			Folder: "",
+		}
+
+		_, err := p.GenerateFeed(context.Background(), "pod1", podcastEntity, "https://img.png")
+		require.NoError(t, err)
+
+		// Read generated file to check content
+		files, globErr := filepath.Glob(dir + "/*.rss")
+		require.NoError(t, globErr)
+		require.Len(t, files, 1)
+
+		content, readErr := os.ReadFile(files[0])
+		require.NoError(t, readErr)
+		feedContent := string(content)
+
+		assert.Contains(t, feedContent, "<title>My Episode Title</title>")
+		assert.Contains(t, feedContent, "Test Artist - Test Album (2024)")
+		assert.Contains(t, feedContent, "Episode comment")
+		assert.Contains(t, feedContent, "<itunes:duration>01:23:45</itunes:duration>")
+	})
+
+	t.Run("episode without title falls back to filename", func(t *testing.T) {
+		dir := t.TempDir()
+		episodes := []*podcast.Episode{
+			{
+				Filename: "2024-01-01-ep1.mp3",
+				PubDate:  "Mon, 01 Jan 2024 00:00:00 +0000",
+				Size:     1000,
+				Status:   podcast.Uploaded,
+				Location: "https://s3/ep1.mp3",
+			},
+		}
+
+		store := &mocks.EpisodeStoreMock{
+			FindEpisodesByStatusFunc: func(podcastID string, status podcast.Status) ([]*podcast.Episode, error) {
+				return episodes, nil
+			},
+		}
+
+		p := &proc.Processor{Storage: store, StoragePath: dir}
+		_, err := p.GenerateFeed(context.Background(), "pod1", configs.Podcast{Title: "My Podcast"}, "https://img.png")
+		require.NoError(t, err)
+
+		files, globErr := filepath.Glob(dir + "/*.rss")
+		require.NoError(t, globErr)
+		require.Len(t, files, 1)
+
+		content, readErr := os.ReadFile(files[0])
+		require.NoError(t, readErr)
+		feedContent := string(content)
+
+		assert.Contains(t, feedContent, "<title>2024-01-01-ep1.mp3</title>")
+		assert.Contains(t, feedContent, "<![CDATA[2024-01-01-ep1.mp3]]>")
+		assert.NotContains(t, feedContent, "<itunes:duration>")
+	})
+
+	t.Run("episode without duration omits itunes:duration", func(t *testing.T) {
+		dir := t.TempDir()
+		episodes := []*podcast.Episode{
+			{
+				Filename: "ep1.mp3",
+				Size:     500,
+				Status:   podcast.Uploaded,
+				Location: "https://s3/ep1.mp3",
+				Title:    "EP 1",
+				Artist:   "Artist",
+			},
+		}
+
+		store := &mocks.EpisodeStoreMock{
+			FindEpisodesByStatusFunc: func(podcastID string, status podcast.Status) ([]*podcast.Episode, error) {
+				return episodes, nil
+			},
+		}
+
+		p := &proc.Processor{Storage: store, StoragePath: dir}
+		_, err := p.GenerateFeed(context.Background(), "pod1", configs.Podcast{Title: "Pod"}, "https://img.png")
+		require.NoError(t, err)
+
+		files, _ := filepath.Glob(dir + "/*.rss")
+		require.Len(t, files, 1)
+		content, _ := os.ReadFile(files[0])
+		assert.NotContains(t, string(content), "<itunes:duration>")
+	})
+}
+
+func TestBuildItemDescription(t *testing.T) {
+	tests := []struct {
+		name     string
+		episode  podcast.Episode
+		wantDesc string
+	}{
+		{
+			name:     "all metadata",
+			episode:  podcast.Episode{Filename: "ep.mp3", Artist: "A", Album: "B", Year: "2024", Comment: "C"},
+			wantDesc: "A - B (2024)\nC",
+		},
+		{
+			name:     "artist and album, no year",
+			episode:  podcast.Episode{Filename: "ep.mp3", Artist: "A", Album: "B"},
+			wantDesc: "A - B",
+		},
+		{
+			name:     "artist only",
+			episode:  podcast.Episode{Filename: "ep.mp3", Artist: "A"},
+			wantDesc: "A",
+		},
+		{
+			name:     "album and year only",
+			episode:  podcast.Episode{Filename: "ep.mp3", Album: "B", Year: "2024"},
+			wantDesc: "B (2024)",
+		},
+		{
+			name:     "album only",
+			episode:  podcast.Episode{Filename: "ep.mp3", Album: "B"},
+			wantDesc: "B",
+		},
+		{
+			name:     "year only",
+			episode:  podcast.Episode{Filename: "ep.mp3", Year: "2024"},
+			wantDesc: "2024",
+		},
+		{
+			name:     "comment only",
+			episode:  podcast.Episode{Filename: "ep.mp3", Comment: "C"},
+			wantDesc: "C",
+		},
+		{
+			name:     "no metadata falls back to filename",
+			episode:  podcast.Episode{Filename: "ep.mp3"},
+			wantDesc: "ep.mp3",
+		},
+		{
+			name:     "artist and comment, no album/year",
+			episode:  podcast.Episode{Filename: "ep.mp3", Artist: "A", Comment: "C"},
+			wantDesc: "A\nC",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := proc.BuildItemDescription(&tt.episode)
+			assert.Equal(t, tt.wantDesc, result)
+		})
+	}
 }
