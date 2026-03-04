@@ -12,6 +12,7 @@ import (
 
 	log "github.com/go-pkgz/lgr"
 	"podgen/internal/app/podgen/podcast"
+	"podgen/internal/pkg/tagger"
 )
 
 // Files for work with files of episodes
@@ -41,18 +42,34 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 			return nil, err
 		}
 
+		filePath := fmt.Sprintf("%s/%s/%s", f.Storage, folderName, entity.Name())
+		meta, metaErr := tagger.ReadMetadata(filePath)
+		if metaErr != nil {
+			log.Printf("[WARN] could not read ID3 tags from %s: %v", entity.Name(), metaErr)
+		}
+
 		pubDate := time.Now()
 
-		matches := re.FindAllString(entity.Name(), -1)
-		if matches != nil {
-			match := matches[0]
-			formatDate := "2006-01-02"
-			pubDate, err = time.Parse(formatDate, match)
-			if err != nil {
-				formatDate2 := "2006-01-2"
-				pubDate, err = time.Parse(formatDate2, match)
+		// Use ID3 Year tag if available, otherwise fall back to filename date regex.
+		if meta.Year != "" {
+			parsed, parseErr := time.Parse("2006", meta.Year)
+			if parseErr == nil {
+				pubDate = parsed
+			} else {
+				log.Printf("[WARN] could not parse ID3 Year %q from %s: %v", meta.Year, entity.Name(), parseErr)
+			}
+		} else {
+			matches := re.FindAllString(entity.Name(), -1)
+			if matches != nil {
+				match := matches[0]
+				formatDate := "2006-01-02"
+				pubDate, err = time.Parse(formatDate, match)
 				if err != nil {
-					log.Printf("[WARN] %s, %v", match, err)
+					formatDate2 := "2006-01-2"
+					pubDate, err = time.Parse(formatDate2, match)
+					if err != nil {
+						log.Printf("[WARN] %s, %v", match, err)
+					}
 				}
 			}
 		}
@@ -62,6 +79,11 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 			Size:     entityInfo.Size(),
 			Status:   podcast.New,
 			PubDate:  pubDate.Format(time.RFC1123Z),
+			Title:    meta.Title,
+			Artist:   meta.Artist,
+			Album:    meta.Album,
+			Year:     meta.Year,
+			Comment:  meta.Comment,
 		}
 	}
 
