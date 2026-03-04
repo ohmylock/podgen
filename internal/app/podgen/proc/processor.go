@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"strings"
 
@@ -386,7 +387,7 @@ func (p *Processor) GenerateFeed(_ context.Context, podcastID string, podcastEnt
 		}
 		desc := BuildItemDescription(episode)
 		item := "<item>\n" +
-			fmt.Sprintf("<title>%s</title>\n", title) +
+			fmt.Sprintf("<title>%s</title>\n", html.EscapeString(title)) +
 			fmt.Sprintf("<description><![CDATA[%s]]></description>\n", desc) +
 			fmt.Sprintf("<itunes:summary><![CDATA[%s]]></itunes:summary>\n", desc) +
 			fmt.Sprintf("<pubDate>%s</pubDate>\n", episode.PubDate) +
