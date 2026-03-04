@@ -31,3 +31,15 @@ func (c *Conf) Validate() error {
 
 	return nil
 }
+
+// ValidateForMigration checks only the configuration fields needed for migration.
+// Migration only requires database settings, not podcast/S3 configuration.
+func (c *Conf) ValidateForMigration() error {
+	// Migration needs an explicitly configured destination database path.
+	// We check raw config fields rather than GetStorageDSN() which has fallback defaults.
+	// Without explicit config, migration would silently write to ./podgen.db
+	if c.Database.DSN == "" && c.Database.Path == "" && c.DB == "" {
+		return errors.New("database path is required for migration destination (set database.path, database.dsn, or legacy db field)")
+	}
+	return nil
+}

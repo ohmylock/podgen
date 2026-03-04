@@ -135,6 +135,12 @@ func TestNewFromStrings(t *testing.T) {
 			dsn:         "postgres://localhost/test",
 			wantErr:     true,
 		},
+		{
+			name:        "unknown type returns error",
+			storageType: "unknown",
+			dsn:         filepath.Join(tmpDir, "unknown.db"),
+			wantErr:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -164,27 +170,39 @@ func TestNewFromStrings(t *testing.T) {
 
 func TestParseStorageType(t *testing.T) {
 	tests := []struct {
-		input string
-		want  storage.StorageType
+		input   string
+		want    storage.StorageType
+		wantErr bool
 	}{
-		{"sqlite", storage.TypeSQLite},
-		{"SQLite", storage.TypeSQLite},
-		{"SQLITE", storage.TypeSQLite},
-		{"sqlite3", storage.TypeSQLite},
-		{"", storage.TypeSQLite},
-		{"  ", storage.TypeSQLite},
-		{"bolt", storage.TypeBolt},
-		{"boltdb", storage.TypeBolt},
-		{"BoltDB", storage.TypeBolt},
-		{"postgres", storage.TypePostgres},
-		{"postgresql", storage.TypePostgres},
-		{"pg", storage.TypePostgres},
-		{"unknown", storage.TypeSQLite}, // defaults to sqlite
+		{"sqlite", storage.TypeSQLite, false},
+		{"SQLite", storage.TypeSQLite, false},
+		{"SQLITE", storage.TypeSQLite, false},
+		{"sqlite3", storage.TypeSQLite, false},
+		{"", storage.TypeSQLite, false},
+		{"  ", storage.TypeSQLite, false},
+		{"bolt", storage.TypeBolt, false},
+		{"boltdb", storage.TypeBolt, false},
+		{"BoltDB", storage.TypeBolt, false},
+		{"postgres", storage.TypePostgres, false},
+		{"postgresql", storage.TypePostgres, false},
+		{"pg", storage.TypePostgres, false},
+		{"unknown", "", true}, // unknown types return error
+		{"typo", "", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := factory.ParseStorageType(tt.input)
+			got, err := factory.ParseStorageType(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ParseStorageType(%q) expected error, got nil", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("ParseStorageType(%q) unexpected error: %v", tt.input, err)
+				return
+			}
 			if got != tt.want {
 				t.Errorf("ParseStorageType(%q) = %q, want %q", tt.input, got, tt.want)
 			}
