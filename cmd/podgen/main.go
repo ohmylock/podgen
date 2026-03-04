@@ -13,6 +13,7 @@ import (
 	"podgen/internal/app/podgen"
 	"podgen/internal/app/podgen/proc"
 	"podgen/internal/configs"
+	"podgen/internal/pkg/progress"
 )
 
 var opts struct {
@@ -26,10 +27,20 @@ var opts struct {
 	AllPodcasts       bool   `short:"a" long:"all" description:"All podcasts"`
 	Rollback          bool   `short:"r" long:"rollback" description:"Rollback last episode"`
 	RollbackBySession string `long:"rollback-session" description:"Rollback by session name"`
+	ShowRSS           bool   `long:"rss" description:"Show RSS feed URL for podcasts"`
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
 }
 
 var version string
+
+// isTerminal returns true if the given file is a terminal device.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
 
 func main() {
 	fmt.Printf("podgen %s\n", version)
@@ -104,6 +115,10 @@ func main() {
 		ChunkSize:   chunkSize,
 	}
 
+	if isTerminal(os.Stdout) {
+		procEntity.Progress = progress.NewMulti(os.Stdout, chunkSize, 0)
+	}
+
 	app, err := podgen.NewApplication(conf, procEntity)
 	if err != nil {
 		log.Fatalf("[ERROR] can't create app, %v", err)
@@ -152,5 +167,12 @@ func main() {
 			images = app.GetPodcastImages(ctx, podcasts)
 		}
 		app.GenerateFeed(ctx, podcasts, images)
+	}
+
+	if opts.ShowRSS {
+		urls := app.GetFeedURLs(podcasts)
+		for id, url := range urls {
+			fmt.Printf("%s: %s\n", id, url)
+		}
 	}
 }
