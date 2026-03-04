@@ -266,6 +266,71 @@ func TestBoltDB_SaveEpisode_UpdateExisting(t *testing.T) {
 	assert.Equal(t, "https://s3/bucket/ep1.mp3", got.Location)
 }
 
+func TestBoltDB_SaveEpisode_WithMetadata(t *testing.T) {
+	store := newTestDB(t)
+	podcastID := "test-podcast"
+
+	ep := &podcast.Episode{
+		Filename: "ep-meta.mp3",
+		PubDate:  "Mon, 01 Jan 2024 00:00:00 +0000",
+		Size:     5000,
+		Status:   podcast.New,
+		Title:    "My Episode Title",
+		Artist:   "Some Artist",
+		Album:    "Best Of Album",
+		Year:     "2024",
+		Comment:  "A great episode",
+		Duration: "45:30",
+	}
+
+	err := store.SaveEpisode(podcastID, ep)
+	require.NoError(t, err)
+
+	got, err := store.GetEpisodeByFilename(podcastID, "ep-meta.mp3")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "My Episode Title", got.Title)
+	assert.Equal(t, "Some Artist", got.Artist)
+	assert.Equal(t, "Best Of Album", got.Album)
+	assert.Equal(t, "2024", got.Year)
+	assert.Equal(t, "A great episode", got.Comment)
+	assert.Equal(t, "45:30", got.Duration)
+}
+
+func TestBoltDB_BackwardCompat_OldEpisodeWithoutMetadata(t *testing.T) {
+	store := newTestDB(t)
+	podcastID := "test-podcast"
+
+	// Write raw JSON without new metadata fields (simulates old data format)
+	oldJSON := `{"Filename":"old-ep.mp3","PubDate":"Mon, 01 Jan 2023 00:00:00 +0000","Size":9999,"Status":1,"Location":"https://example.com/old-ep.mp3","Session":"sess-old"}`
+
+	err := store.WithWriteTx(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte(podcastID))
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte("old-ep.mp3"), []byte(oldJSON))
+	})
+	require.NoError(t, err)
+
+	got, err := store.GetEpisodeByFilename(podcastID, "old-ep.mp3")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	// Core fields intact
+	assert.Equal(t, "old-ep.mp3", got.Filename)
+	assert.Equal(t, int64(9999), got.Size)
+	assert.Equal(t, podcast.Uploaded, got.Status)
+
+	// New metadata fields default to empty strings
+	assert.Equal(t, "", got.Title)
+	assert.Equal(t, "", got.Artist)
+	assert.Equal(t, "", got.Album)
+	assert.Equal(t, "", got.Year)
+	assert.Equal(t, "", got.Comment)
+	assert.Equal(t, "", got.Duration)
+}
+
 func TestBoltDB_WithWriteTx(t *testing.T) {
 	store := newTestDB(t)
 
