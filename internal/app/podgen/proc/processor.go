@@ -416,20 +416,20 @@ func (p *Processor) GenerateFeed(_ context.Context, podcastID string, podcastEnt
 		"<channel>\n" +
 		fmt.Sprintf("<title>%s</title>\n<description><![CDATA[%s]]></description>\n", html.EscapeString(podcastEntity.Title), safeTitle) +
 		"<generator>PodGen</generator>\n" +
-		fmt.Sprintf("<language>%s</language>\n", info["language"]) +
+		fmt.Sprintf("<language>%s</language>\n", html.EscapeString(info["language"])) +
 		"<itunes:explicit>No</itunes:explicit>\n" +
 		fmt.Sprintf("<itunes:subtitle>%s</itunes:subtitle>\n<itunes:summary><![CDATA[%s]]></itunes:summary>\n", html.EscapeString(podcastEntity.Title), safeTitle) +
-		fmt.Sprintf("<itunes:author>%s</itunes:author>\n", info["author"]) +
-		fmt.Sprintf("<author>%s</author>\n", info["author"]) +
+		fmt.Sprintf("<itunes:author>%s</itunes:author>\n", html.EscapeString(info["author"])) +
+		fmt.Sprintf("<author>%s</author>\n", html.EscapeString(info["author"])) +
 		"<image>\n" +
 		fmt.Sprintf("<url>%s</url>\n", podcastImageURL) +
 		"</image>\n" +
 		fmt.Sprintf("<itunes:image href=%q />\n", podcastImageURL) +
 		"<itunes:owner>\n" +
-		fmt.Sprintf("<itunes:name>%s</itunes:name>\n", info["owner"]) +
-		fmt.Sprintf("<itunes:email>%s</itunes:email>\n", info["email"]) +
+		fmt.Sprintf("<itunes:name>%s</itunes:name>\n", html.EscapeString(info["owner"])) +
+		fmt.Sprintf("<itunes:email>%s</itunes:email>\n", html.EscapeString(info["email"])) +
 		"</itunes:owner>\n" +
-		fmt.Sprintf("<itunes:category text=%q />\n", info["category"])
+		fmt.Sprintf("<itunes:category text=\"%s\" />\n", html.EscapeString(info["category"])) //nolint:gocritic // html.EscapeString handles quote escaping for XML
 
 	footer = "</channel>\n</rss>"
 	for _, episode := range episodes {
