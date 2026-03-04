@@ -45,19 +45,37 @@ func isTerminal(f *os.File) bool {
 func main() {
 	fmt.Printf("podgen %s\n", version)
 
-	p := flags.NewParser(&opts, flags.PassDoubleDash|flags.HelpFlag)
-	_, err := p.Parse()
-	if err != nil {
-		if flagErr, ok := err.(*flags.Error); ok && flagErr.Type == flags.ErrHelp {
-			p.WriteHelp(os.Stderr)
-			return
-		}
-		log.Fatalf("[ERROR] %v", err)
+	if !parseFlags() {
+		return
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	conf := loadConfig()
+	app := setupApplication(conf)
+	podcasts := resolvePodcasts(app)
+
+	exitCode := runOperations(ctx, app, podcasts)
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+}
+
+func parseFlags() bool {
+	p := flags.NewParser(&opts, flags.PassDoubleDash|flags.HelpFlag)
+	_, err := p.Parse()
+	if err != nil {
+		if flagErr, ok := err.(*flags.Error); ok && flagErr.Type == flags.ErrHelp {
+			p.WriteHelp(os.Stderr)
+			return false
+		}
+		log.Fatalf("[ERROR] %v", err)
+	}
+	return true
+}
+
+func loadConfig() *configs.Conf {
 	configFile := opts.Conf
 	if !proc.CheckFileExists(configFile) {
 		configFile = "configs/podgen.yml"
@@ -76,15 +94,11 @@ func main() {
 		log.Fatal("[ERROR] storage folder not found")
 	}
 
-	dbFilepath := ""
-	if conf.DB != "" {
-		dbFilepath = conf.DB
-	}
+	return conf
+}
 
-	if opts.DB != "" {
-		dbFilepath = opts.DB
-	}
-
+func setupApplication(conf *configs.Conf) *podgen.App {
+	dbFilepath := resolveDBPath(conf)
 	if dbFilepath == "" {
 		log.Fatal("[ERROR] You don't set bolt db file")
 	}
@@ -107,6 +121,7 @@ func main() {
 	if chunkSize == 0 {
 		chunkSize = 3
 	}
+
 	procEntity := &proc.Processor{
 		Storage:     &proc.BoltDB{DB: db},
 		S3Client:    &proc.S3Store{Client: s3client, Location: conf.CloudStorage.Region, Bucket: conf.CloudStorage.Bucket},
@@ -124,10 +139,21 @@ func main() {
 		log.Fatalf("[ERROR] can't create app, %v", err)
 	}
 
+	return app
+}
+
+func resolveDBPath(conf *configs.Conf) string {
+	dbFilepath := conf.DB
+	if opts.DB != "" {
+		dbFilepath = opts.DB
+	}
+	return dbFilepath
+}
+
+func resolvePodcasts(app *podgen.App) string {
 	podcasts := opts.Podcasts
 	if podcasts == "" && opts.AllPodcasts {
 		podcastEntities := app.FindPodcasts()
-
 		for i := range podcastEntities {
 			if podcasts != "" {
 				podcasts += ", "
@@ -139,13 +165,19 @@ func main() {
 	if podcasts == "" {
 		log.Fatalf("[ERROR] You didn't list podcasts")
 	}
+	return podcasts
+}
+
+func runOperations(ctx context.Context, app *podgen.App, podcasts string) int {
+	var hasError bool
 
 	if opts.Scan {
-		app.Update(ctx, podcasts)
+		if err := app.Update(ctx, podcasts); err != nil {
+			hasError = true
+		}
 	}
 
 	var images map[string]string
-
 	if opts.UpdateImage {
 		images = app.UploadPodcastImage(ctx, podcasts)
 	}
@@ -157,16 +189,25 @@ func main() {
 	}
 
 	if opts.Upload {
-		app.DeleteOldEpisodes(ctx, podcasts)
-		app.UploadEpisodes(ctx, podcasts)
+		if err := app.DeleteOldEpisodes(ctx, podcasts); err != nil {
+			hasError = true
+		}
+		if err := app.UploadEpisodes(ctx, podcasts); err != nil {
+			hasError = true
+		}
+		// Always auto-trigger feed update after upload phase, even if some podcasts failed
+		// Each podcast's feed will be regenerated from its currently uploaded episodes
 		opts.UpdateFeed = true
 	}
 
+	// Run feed generation if explicitly requested OR auto-triggered by upload
 	if opts.UpdateFeed {
 		if images == nil {
 			images = app.GetPodcastImages(ctx, podcasts)
 		}
-		app.GenerateFeed(ctx, podcasts, images)
+		if err := app.GenerateFeed(ctx, podcasts, images); err != nil {
+			hasError = true
+		}
 	}
 
 	if opts.ShowRSS {
@@ -175,4 +216,9 @@ func main() {
 			fmt.Printf("%s: %s\n", id, url)
 		}
 	}
+
+	if hasError {
+		return 1
+	}
+	return 0
 }

@@ -84,6 +84,7 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 			Album:    meta.Album,
 			Year:     meta.Year,
 			Comment:  meta.Comment,
+			Duration: meta.Duration,
 		}
 	}
 

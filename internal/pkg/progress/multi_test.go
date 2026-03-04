@@ -186,3 +186,35 @@ func TestMultiRenderContainsProgress(t *testing.T) {
 	assert.Contains(t, output, "Total:")
 	assert.Contains(t, output, "0/2")
 }
+
+func TestMultiReset(t *testing.T) {
+	var buf strings.Builder
+	m := NewMulti(&buf, 2, 5)
+
+	// Simulate some activity
+	m.StartFile(0, "file1.mp3", 1024)
+	m.CompleteFile(0, 1024, nil)
+	m.StartFile(1, "file2.mp3", 2048)
+	m.CompleteFile(1, 2048, assert.AnError)
+
+	m.mu.Lock()
+	assert.Equal(t, 2, m.completed)
+	assert.Equal(t, 1, m.errors)
+	assert.Equal(t, int64(1024), m.totalBytes)
+	m.mu.Unlock()
+
+	// Reset with new total
+	m.Reset(10)
+
+	m.mu.Lock()
+	assert.Equal(t, 10, m.total)
+	assert.Equal(t, 0, m.completed)
+	assert.Equal(t, 0, m.errors)
+	assert.Equal(t, int64(0), m.totalBytes)
+	assert.Equal(t, 0, m.linesWritten)
+	// Workers should be reset
+	assert.False(t, m.workers[0].Active)
+	assert.False(t, m.workers[1].Active)
+	assert.Equal(t, "", m.workers[0].Filename)
+	m.mu.Unlock()
+}

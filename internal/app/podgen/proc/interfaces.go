@@ -47,4 +47,5 @@ type ProgressReporter interface {
 	UpdateProgress(workerID int, uploaded, total int64)
 	CompleteFile(workerID int, fileSize int64, err error)
 	Finish()
+	Reset(totalTasks int)
 }
