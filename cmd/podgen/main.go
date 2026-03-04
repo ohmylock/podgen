@@ -55,15 +55,16 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	conf := loadConfig()
-
-	// Handle migration if requested
+	// Handle migration if requested (uses simpler validation)
 	if opts.MigrateFrom != "" {
+		conf := loadConfig(true)
 		if err := runMigration(conf); err != nil {
 			log.Fatalf("[ERROR] migration failed: %v", err)
 		}
 		return
 	}
+
+	conf := loadConfig(false)
 
 	app, store := setupApplication(conf)
 	defer store.Close()
@@ -89,19 +90,47 @@ func parseFlags() bool {
 	return true
 }
 
-func loadConfig() *configs.Conf {
+func loadConfig(forMigration bool) *configs.Conf {
 	configFile := opts.Conf
 	if !proc.CheckFileExists(configFile) {
 		configFile = "configs/podgen.yml"
 	}
 
-	if !proc.CheckFileExists(configFile) {
+	configExists := proc.CheckFileExists(configFile)
+
+	// Migration with -d flag can run without config file or with malformed config
+	// The -d flag provides complete destination specification
+	if forMigration && opts.DB != "" {
+		if !configExists {
+			return &configs.Conf{}
+		}
+		// Try to load config but don't fail if it's malformed
+		conf, err := configs.Load(configFile)
+		if err != nil {
+			log.Printf("[WARN] config file could not be loaded: %v, using CLI flags only", err)
+			return &configs.Conf{}
+		}
+		return conf
+	}
+
+	if !configExists {
 		log.Fatal("[ERROR] config file not found")
 	}
 
 	conf, err := configs.Load(configFile)
 	if err != nil {
 		log.Fatalf("[ERROR] can't load config %s, %v", opts.Conf, err)
+	}
+
+	// Migration mode only needs database config, not full app config
+	// If CLI -d flag is provided, it supplies the destination, so skip validation
+	if forMigration {
+		if opts.DB == "" {
+			if err := conf.ValidateForMigration(); err != nil {
+				log.Fatalf("[ERROR] invalid config for migration: %v", err)
+			}
+		}
+		return conf
 	}
 
 	if err := conf.Validate(); err != nil {
@@ -120,7 +149,8 @@ func setupApplication(conf *configs.Conf) (*podgen.App, storage.Store) {
 	storageType := conf.GetStorageType()
 	storageDSN := conf.GetStorageDSN()
 
-	// CLI flag overrides config
+	// CLI flag overrides config path only, not type
+	// Type is determined by config (explicit or legacy inference), CLI only changes path
 	if opts.DB != "" {
 		storageDSN = opts.DB
 	}
@@ -203,10 +233,17 @@ func runMigration(conf *configs.Conf) error {
 	defer srcStore.Close()
 
 	// Create destination store from config
+	// When -d flag is provided for migration, always infer type from CLI path
+	// This allows migrating from Bolt (legacy config) to SQLite (new default)
 	dstType := conf.GetStorageType()
 	dstPath := conf.GetStorageDSN()
 	if opts.DB != "" {
 		dstPath = opts.DB
+		// For migration with explicit -d, infer type from destination path
+		// unless config has explicit database.type set (not just legacy db:)
+		if conf.Database.Type == "" {
+			dstType = configs.InferStorageTypeFromPath(opts.DB)
+		}
 	}
 
 	dstStore, err := factory.NewFromStrings(dstType, dstPath)
@@ -226,8 +263,8 @@ func runMigration(conf *configs.Conf) error {
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
-	log.Printf("[INFO] Migration complete: %d podcasts, %d episodes migrated, %d failed",
-		stats.PodcastsProcessed, stats.EpisodesMigrated, stats.EpisodesFailed)
+	log.Printf("[INFO] Migration complete: %d podcasts (%d failed), %d episodes migrated, %d failed",
+		stats.PodcastsProcessed, stats.PodcastsFailed, stats.EpisodesMigrated, stats.EpisodesFailed)
 
 	return nil
 }

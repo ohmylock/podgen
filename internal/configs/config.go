@@ -70,9 +70,34 @@ func Load(fileName string) (res *Conf, err error) {
 }
 
 // GetStorageType returns the configured storage type, defaulting to "sqlite"
+// For backward compatibility, legacy DB field always defaults to "bolt" since
+// the db: field historically only worked with Bolt backend
 func (c *Conf) GetStorageType() string {
 	if c.Database.Type != "" {
 		return c.Database.Type
+	}
+	// Legacy backward-compatibility: db: field was Bolt-only, so default to bolt
+	if c.DB != "" {
+		return "bolt"
+	}
+	return "sqlite"
+}
+
+// HasStorageTypePreference returns true if config has explicit type preference,
+// uses legacy db field, or explicitly sets database.path (indicating new config format).
+// When any of these are set, CLI should not infer type from path extension.
+func (c *Conf) HasStorageTypePreference() bool {
+	return c.Database.Type != "" || c.Database.Path != "" || c.DB != ""
+}
+
+// InferStorageTypeFromPath detects storage type from file extension.
+// Returns "bolt" for .bdb and .bolt files, "sqlite" otherwise.
+func InferStorageTypeFromPath(path string) string {
+	if len(path) > 4 && path[len(path)-4:] == ".bdb" {
+		return "bolt"
+	}
+	if len(path) > 5 && path[len(path)-5:] == ".bolt" {
+		return "bolt"
 	}
 	return "sqlite"
 }

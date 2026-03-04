@@ -28,8 +28,12 @@ func New(cfg storage.Config) (storage.Store, error) {
 
 // NewFromStrings creates a new Store from string type and DSN.
 // This is a convenience function for use with configuration systems.
+// Returns an error if the storage type is unknown.
 func NewFromStrings(storageType, dsn string) (storage.Store, error) {
-	st := ParseStorageType(storageType)
+	st, err := ParseStorageType(storageType)
+	if err != nil {
+		return nil, err
+	}
 	cfg := storage.Config{
 		Type:         st,
 		DSN:          dsn,
@@ -39,17 +43,18 @@ func NewFromStrings(storageType, dsn string) (storage.Store, error) {
 	return New(cfg)
 }
 
-// ParseStorageType converts a string to StorageType, defaulting to TypeSQLite.
-func ParseStorageType(s string) storage.StorageType {
+// ParseStorageType converts a string to StorageType.
+// Returns an error for unknown storage types to prevent silent failures.
+func ParseStorageType(s string) (storage.StorageType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "sqlite", "sqlite3", "":
-		return storage.TypeSQLite
+		return storage.TypeSQLite, nil
 	case "bolt", "boltdb":
-		return storage.TypeBolt
+		return storage.TypeBolt, nil
 	case "postgres", "postgresql", "pg":
-		return storage.TypePostgres
+		return storage.TypePostgres, nil
 	default:
-		return storage.TypeSQLite
+		return "", fmt.Errorf("unknown storage type %q: valid types are sqlite, bolt, postgres", s)
 	}
 }
 

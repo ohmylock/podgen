@@ -10,6 +10,7 @@ import (
 // MigrateStats holds statistics about a migration operation.
 type MigrateStats struct {
 	PodcastsProcessed int
+	PodcastsFailed    int
 	EpisodesMigrated  int
 	EpisodesFailed    int
 }
@@ -40,6 +41,7 @@ func Migrate(from, to Store) (*MigrateStats, error) {
 		episodeCount, failedCount, err := migratePodcast(from, to, podcastID)
 		if err != nil {
 			log.Printf("[ERROR] Failed to migrate podcast %s: %v", podcastID, err)
+			stats.PodcastsFailed++
 			stats.EpisodesFailed += failedCount
 			continue
 		}
@@ -51,8 +53,13 @@ func Migrate(from, to Store) (*MigrateStats, error) {
 		log.Printf("[INFO] Migrated podcast %s: %d episodes", podcastID, episodeCount)
 	}
 
-	log.Printf("[INFO] Migration completed: %d podcasts, %d episodes migrated, %d failed",
-		stats.PodcastsProcessed, stats.EpisodesMigrated, stats.EpisodesFailed)
+	log.Printf("[INFO] Migration completed: %d podcasts (%d failed), %d episodes migrated, %d failed",
+		stats.PodcastsProcessed, stats.PodcastsFailed, stats.EpisodesMigrated, stats.EpisodesFailed)
+
+	// Return error if any failures occurred to ensure non-zero exit code
+	if stats.PodcastsFailed > 0 || stats.EpisodesFailed > 0 {
+		return stats, fmt.Errorf("migration completed with %d failed podcasts, %d failed episodes", stats.PodcastsFailed, stats.EpisodesFailed)
+	}
 
 	return stats, nil
 }
@@ -106,6 +113,7 @@ func MigrateWithProgressCallback(from, to Store, callback MigrateProgressCallbac
 		episodeCount, failedCount, err := migratePodcast(from, to, podcastID)
 		if err != nil {
 			log.Printf("[ERROR] Failed to migrate podcast %s: %v", podcastID, err)
+			stats.PodcastsFailed++
 			stats.EpisodesFailed += failedCount
 			continue
 		}
@@ -121,8 +129,13 @@ func MigrateWithProgressCallback(from, to Store, callback MigrateProgressCallbac
 		log.Printf("[INFO] Migrated podcast %s: %d episodes (%d/%d)", podcastID, episodeCount, i+1, totalPodcasts)
 	}
 
-	log.Printf("[INFO] Migration completed: %d podcasts, %d episodes migrated, %d failed",
-		stats.PodcastsProcessed, stats.EpisodesMigrated, stats.EpisodesFailed)
+	log.Printf("[INFO] Migration completed: %d podcasts (%d failed), %d episodes migrated, %d failed",
+		stats.PodcastsProcessed, stats.PodcastsFailed, stats.EpisodesMigrated, stats.EpisodesFailed)
+
+	// Return error if any failures occurred to ensure non-zero exit code
+	if stats.PodcastsFailed > 0 || stats.EpisodesFailed > 0 {
+		return stats, fmt.Errorf("migration completed with %d failed podcasts, %d failed episodes", stats.PodcastsFailed, stats.EpisodesFailed)
+	}
 
 	return stats, nil
 }
