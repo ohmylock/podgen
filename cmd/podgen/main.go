@@ -14,11 +14,13 @@ import (
 	"podgen/internal/app/podgen/proc"
 	"podgen/internal/configs"
 	"podgen/internal/pkg/progress"
+	"podgen/internal/storage"
+	"podgen/internal/storage/factory"
 )
 
 var opts struct {
 	Conf              string `short:"c" long:"conf" env:"PODGEN_CONF" default:"podgen.yml" description:"config file (yml)"`
-	DB                string `short:"d" long:"db" env:"PODGEN_DB" description:"bolt db file"`
+	DB                string `short:"d" long:"db" env:"PODGEN_DB" description:"database file path (overrides config)"`
 	Upload            bool   `short:"u" long:"upload" description:"Upload episodes"`
 	Scan              bool   `short:"s" long:"scan" description:"Find and add new episodes"`
 	UpdateFeed        bool   `short:"f" long:"feed" description:"Regenerate feeds"`
@@ -28,6 +30,7 @@ var opts struct {
 	Rollback          bool   `short:"r" long:"rollback" description:"Rollback last episode"`
 	RollbackBySession string `long:"rollback-session" description:"Rollback by session name"`
 	ShowRSS           bool   `long:"rss" description:"Show RSS feed URL for podcasts"`
+	MigrateFrom       string `long:"migrate-from" description:"Migrate data from another database (format: type:path, e.g., bolt:/path/to/db)"`
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
 }
 
@@ -53,7 +56,18 @@ func main() {
 	defer cancel()
 
 	conf := loadConfig()
-	app := setupApplication(conf)
+
+	// Handle migration if requested
+	if opts.MigrateFrom != "" {
+		if err := runMigration(conf); err != nil {
+			log.Fatalf("[ERROR] migration failed: %v", err)
+		}
+		return
+	}
+
+	app, store := setupApplication(conf)
+	defer store.Close()
+
 	podcasts := resolvePodcasts(app)
 
 	exitCode := runOperations(ctx, app, podcasts)
@@ -97,15 +111,27 @@ func loadConfig() *configs.Conf {
 	return conf
 }
 
-func setupApplication(conf *configs.Conf) *podgen.App {
-	dbFilepath := resolveDBPath(conf)
-	if dbFilepath == "" {
-		log.Fatal("[ERROR] You don't set bolt db file")
+func setupApplication(conf *configs.Conf) (*podgen.App, storage.Store) {
+	// Create storage using factory
+	storageType := conf.GetStorageType()
+	storageDSN := conf.GetStorageDSN()
+
+	// CLI flag overrides config
+	if opts.DB != "" {
+		storageDSN = opts.DB
 	}
 
-	db, err := podgen.NewBoltDB(dbFilepath)
+	if storageDSN == "" {
+		log.Fatal("[ERROR] database path not configured")
+	}
+
+	store, err := factory.NewFromStrings(storageType, storageDSN)
 	if err != nil {
-		log.Fatalf("[ERROR] can't create boltdb instance, %v", err)
+		log.Fatalf("[ERROR] can't create storage instance: %v", err)
+	}
+
+	if err := store.Open(); err != nil {
+		log.Fatalf("[ERROR] can't open storage: %v", err)
 	}
 
 	s3client, err := podgen.NewS3Client(
@@ -123,7 +149,7 @@ func setupApplication(conf *configs.Conf) *podgen.App {
 	}
 
 	procEntity := &proc.Processor{
-		Storage:     &proc.BoltDB{DB: db},
+		Storage:     store,
 		S3Client:    &proc.S3Store{Client: s3client, Location: conf.CloudStorage.Region, Bucket: conf.CloudStorage.Bucket},
 		Files:       &proc.Files{Storage: conf.Storage.Folder},
 		StoragePath: conf.Storage.Folder,
@@ -139,15 +165,67 @@ func setupApplication(conf *configs.Conf) *podgen.App {
 		log.Fatalf("[ERROR] can't create app, %v", err)
 	}
 
-	return app
+	return app, store
 }
 
-func resolveDBPath(conf *configs.Conf) string {
-	dbFilepath := conf.DB
-	if opts.DB != "" {
-		dbFilepath = opts.DB
+// runMigration migrates data from a source database to the configured destination.
+// The source format is "type:path" (e.g., "bolt:/path/to/db" or "sqlite:/path/to/db.sqlite").
+func runMigration(conf *configs.Conf) error {
+	// Parse source specification
+	srcSpec := opts.MigrateFrom
+	var srcType, srcPath string
+
+	// Find the first colon that separates type from path
+	for i, c := range srcSpec {
+		if c == ':' {
+			srcType = srcSpec[:i]
+			srcPath = srcSpec[i+1:]
+			break
+		}
 	}
-	return dbFilepath
+
+	if srcType == "" || srcPath == "" {
+		return fmt.Errorf("invalid migration source format: %q (expected type:path, e.g., bolt:/path/to/db)", srcSpec)
+	}
+
+	// Create source store
+	srcStore, err := factory.NewFromStrings(srcType, srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to create source store: %w", err)
+	}
+	if err := srcStore.Open(); err != nil {
+		return fmt.Errorf("failed to open source store: %w", err)
+	}
+	defer srcStore.Close()
+
+	// Create destination store from config
+	dstType := conf.GetStorageType()
+	dstPath := conf.GetStorageDSN()
+	if opts.DB != "" {
+		dstPath = opts.DB
+	}
+
+	dstStore, err := factory.NewFromStrings(dstType, dstPath)
+	if err != nil {
+		return fmt.Errorf("failed to create destination store: %w", err)
+	}
+	if err := dstStore.Open(); err != nil {
+		return fmt.Errorf("failed to open destination store: %w", err)
+	}
+	defer dstStore.Close()
+
+	log.Printf("[INFO] Migrating from %s (%s) to %s (%s)", srcType, srcPath, dstType, dstPath)
+
+	// Run migration
+	stats, err := storage.Migrate(srcStore, dstStore)
+	if err != nil {
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
+	log.Printf("[INFO] Migration complete: %d podcasts, %d episodes migrated, %d failed",
+		stats.PodcastsProcessed, stats.EpisodesMigrated, stats.EpisodesFailed)
+
+	return nil
 }
 
 func resolvePodcasts(app *podgen.App) string {
