@@ -7,6 +7,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// StorageConfig defines database storage configuration
+type StorageConfig struct {
+	// Type specifies the storage backend: sqlite (default), bolt, or postgres
+	Type string `yaml:"type"`
+	// Path is the file path for sqlite/bolt databases
+	Path string `yaml:"path"`
+	// DSN is the connection string for postgres (overrides Path if set)
+	DSN string `yaml:"dsn"`
+}
+
 // Conf for config yaml
 type Conf struct {
 	Podcasts     map[string]Podcast `yaml:"podcasts"`
@@ -22,10 +32,11 @@ type Conf struct {
 	Upload struct {
 		ChunkSize int `yaml:"chunk_size"`
 	} `yaml:"upload"`
-	DB      string `yaml:"db"`
+	DB      string `yaml:"db"` // Deprecated: use Database.Path instead
 	Storage struct {
 		Folder string `yaml:"folder"`
 	} `yaml:"storage"`
+	Database StorageConfig `yaml:"database"`
 }
 
 // Podcast defines podcast section
@@ -55,4 +66,33 @@ func Load(fileName string) (res *Conf, err error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+// GetStorageType returns the configured storage type, defaulting to "sqlite"
+func (c *Conf) GetStorageType() string {
+	if c.Database.Type != "" {
+		return c.Database.Type
+	}
+	return "sqlite"
+}
+
+// GetStorageDSN returns the database path/DSN with fallback to legacy DB field
+func (c *Conf) GetStorageDSN() string {
+	// DSN takes priority (for postgres)
+	if c.Database.DSN != "" {
+		return c.Database.DSN
+	}
+	// Then Path from new config
+	if c.Database.Path != "" {
+		return c.Database.Path
+	}
+	// Fall back to legacy DB field
+	if c.DB != "" {
+		return c.DB
+	}
+	// Default: podgen.db in storage folder
+	if c.Storage.Folder != "" {
+		return c.Storage.Folder + "/podgen.db"
+	}
+	return "podgen.db"
 }
