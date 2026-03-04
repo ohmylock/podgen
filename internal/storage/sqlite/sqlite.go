@@ -267,7 +267,7 @@ func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status,
 	var result []*podcast.Episode
 	var totalSize int64
 	for _, ep := range episodes {
-		if totalSize >= sizeLimit || (totalSize+ep.Size) >= sizeLimit {
+		if totalSize >= sizeLimit || (totalSize+ep.Size) > sizeLimit {
 			break
 		}
 		totalSize += ep.Size
@@ -300,7 +300,7 @@ func (s *Store) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episo
 
 	row := s.db.QueryRow(query, podcastID, fileName)
 	episode, err := s.scanEpisode(row)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, storage.ErrNotFound
 	}
 	if err != nil {
@@ -339,7 +339,7 @@ func (s *Store) GetLastEpisodeByNotStatus(podcastID string, status podcast.Statu
 
 	row := s.db.QueryRow(query, podcastID, status)
 	episode, err := s.scanEpisode(row)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -401,7 +401,7 @@ func (s *Store) ListEpisodes(podcastID string) ([]*podcast.Episode, error) {
 func (s *Store) podcastExists(podcastID string) (bool, error) {
 	var exists int
 	err := s.db.QueryRow("SELECT 1 FROM episodes WHERE podcast_id = ? LIMIT 1", podcastID).Scan(&exists)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -40,7 +40,7 @@ func (s *Store) Open() error {
 		return fmt.Errorf("empty db path: %w", storage.ErrInvalidConfig)
 	}
 
-	if err := os.MkdirAll(path.Dir(s.dsn), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.dsn), 0o700); err != nil {
 		return fmt.Errorf("failed to create db directory: %w", err)
 	}
 
@@ -238,7 +238,7 @@ func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status,
 		var sizes int64
 		result = make([]*podcast.Episode, len(episodes))
 		for i, episode := range episodes {
-			if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) >= sizeLimit) {
+			if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) > sizeLimit) {
 				result = result[:i]
 				return nil
 			}
