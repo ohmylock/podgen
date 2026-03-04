@@ -17,7 +17,7 @@ func newTestDB(t *testing.T) *BoltDB {
 	f.Close()
 	t.Cleanup(func() { os.Remove(f.Name()) })
 
-	db, err := bolt.Open(f.Name(), 0600, nil)
+	db, err := bolt.Open(f.Name(), 0o600, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 

@@ -1,3 +1,4 @@
+// Package progress provides visual progress display for file uploads.
 package progress
 
 import (
@@ -111,7 +112,7 @@ func (m *Multi) Finish() {
 func (m *Multi) render() {
 	m.clearLines()
 
-	var lines []string
+	lines := make([]string, 0, 2+len(m.workers))
 
 	pct := 0
 	if m.total > 0 {
@@ -129,10 +130,9 @@ func (m *Multi) render() {
 		statusParts = append(statusParts, fmt.Sprintf("%d errors", m.errors))
 	}
 
-	lines = append(lines, fmt.Sprintf("\033[1mTotal:\033[0m %s %3d%% │ %s",
-		bar, pct, strings.Join(statusParts, " │ ")))
-
-	lines = append(lines, strings.Repeat("─", 80))
+	lines = append(lines,
+		fmt.Sprintf("\033[1mTotal:\033[0m %s %3d%% │ %s", bar, pct, strings.Join(statusParts, " │ ")),
+		strings.Repeat("─", 80))
 
 	for i, w := range m.workers {
 		line := m.formatWorker(i, w)

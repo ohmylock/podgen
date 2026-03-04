@@ -66,7 +66,13 @@ func NewS3Client(endpoint, accessKeyID, secretAccessKey string, useSSL bool) (*m
 func (a *App) Update(ctx context.Context, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
+	if len(podcasts) == 0 {
+		log.Printf("[WARN] no podcasts found for IDs: %s", podcastIDs)
+		return
+	}
+
 	for i, p := range podcasts {
+		log.Printf("[INFO] scanning podcast %s, folder: %s", i, p.Folder)
 		countNew, err := a.processor.Update(ctx, p.Folder, i)
 		if err != nil {
 			log.Printf("[ERROR] can't update folder %s, %v", p.Folder, err)
@@ -74,6 +80,8 @@ func (a *App) Update(ctx context.Context, podcastIDs string) {
 		}
 		if countNew > 0 {
 			log.Printf("[INFO] found new %d episodes for %s", countNew, p.Title)
+		} else {
+			log.Printf("[INFO] no new episodes for %s", p.Title)
 		}
 	}
 }
@@ -81,6 +89,11 @@ func (a *App) Update(ctx context.Context, podcastIDs string) {
 // UploadEpisodes by podcasts to s3 storage
 func (a *App) UploadEpisodes(ctx context.Context, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+
+	if len(podcasts) == 0 {
+		log.Printf("[WARN] no podcasts found for IDs: %s", podcastIDs)
+		return
+	}
 
 	session, err := a.makeSessionString()
 	if err != nil {
@@ -91,6 +104,7 @@ func (a *App) UploadEpisodes(ctx context.Context, podcastIDs string) {
 	log.Printf("[INFO] Start session: %s", session)
 
 	for i, p := range podcasts {
+		log.Printf("[INFO] uploading podcast %s, folder: %s, maxSize: %d", i, p.Folder, p.MaxSize)
 		if err := a.processor.UploadNewEpisodes(ctx, session, i, p.Folder, p.MaxSize); err != nil {
 			log.Printf("[ERROR] can't upload new episodes for %s, %v", i, err)
 		}
@@ -165,6 +179,24 @@ func (a *App) GetPodcastImages(ctx context.Context, podcastIDs string) map[strin
 // FindPodcasts get list podcast from config file
 func (a *App) FindPodcasts() map[string]configs.Podcast {
 	return a.config.Podcasts
+}
+
+// GetFeedURLs returns RSS feed URLs for specified podcasts
+func (a *App) GetFeedURLs(podcastIDs string) map[string]string {
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+	result := make(map[string]string, len(podcasts))
+
+	for id, p := range podcasts {
+		url, err := a.processor.GetFeedURL(id, p.Folder,
+			a.config.CloudStorage.EndPointURL,
+			a.config.CloudStorage.Bucket)
+		if err != nil {
+			log.Printf("[ERROR] can't get feed URL for %s: %v", id, err)
+			continue
+		}
+		result[id] = url
+	}
+	return result
 }
 
 // RollbackEpisodes rollback last episode by podcasts
