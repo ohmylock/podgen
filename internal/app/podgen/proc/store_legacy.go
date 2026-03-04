@@ -2,8 +2,6 @@ package proc
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/boltdb/bolt"
@@ -11,6 +9,7 @@ import (
 
 	"podgen/internal/app/podgen/podcast"
 	apperrors "podgen/internal/errors"
+	"podgen/internal/storage"
 )
 
 // legacyMu provides write serialization for legacy DB access.
@@ -42,7 +41,7 @@ func (b *BoltDB) findByStatusLegacy(podcastID string, filterStatus podcast.Statu
 		bucket := tx.Bucket([]byte(podcastID))
 		if bucket == nil {
 			log.Printf("no bucket for %s", podcastID)
-			return errors.New("no bucket")
+			return &apperrors.EpisodeError{PodcastID: podcastID, Op: "FindEpisodesByStatus", Err: apperrors.ErrNoBucket}
 		}
 		c := bucket.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
@@ -145,7 +144,7 @@ func (b *BoltDB) findByStatusInTx(tx *bolt.Tx, podcastID string, filterStatus po
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
 		log.Printf("no bucket for %s", podcastID)
-		return nil, errors.New("no bucket")
+		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "FindEpisodesByStatus", Err: apperrors.ErrNoBucket}
 	}
 	c := bucket.Cursor()
 	for k, v := c.First(); k != nil; k, v = c.Next() {
@@ -170,11 +169,11 @@ func (b *BoltDB) getByFilenameLegacy(podcastID, fileName string) (*podcast.Episo
 		bucket := tx.Bucket([]byte(podcastID))
 		if bucket == nil {
 			log.Printf("[WARN] no bucket for %s", podcastID)
-			return fmt.Errorf("no bucket for %s", podcastID)
+			return &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetEpisodeByFilename", Err: apperrors.ErrNoBucket}
 		}
 		item := bucket.Get(key)
 		if item == nil {
-			return errors.New("no episode found")
+			return storage.ErrNotFound
 		}
 		episode = &podcast.Episode{}
 		if err := json.Unmarshal(item, episode); err != nil {
