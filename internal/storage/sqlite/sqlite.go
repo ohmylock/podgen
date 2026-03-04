@@ -34,6 +34,10 @@ func New(cfg storage.Config) *Store {
 
 // Open initializes the SQLite database connection with WAL mode.
 func (s *Store) Open() error {
+	if s.dsn == "" {
+		return fmt.Errorf("empty db path: %w", storage.ErrInvalidConfig)
+	}
+
 	// Create parent directories if they don't exist
 	if dir := filepath.Dir(s.dsn); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -304,7 +308,7 @@ func (s *Store) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episo
 	}
 
 	if episode.Filename == "" {
-		return nil, nil
+		return nil, storage.ErrNotFound
 	}
 
 	return episode, nil
@@ -395,12 +399,15 @@ func (s *Store) ListEpisodes(podcastID string) ([]*podcast.Episode, error) {
 
 // podcastExists checks if any episodes exist for the given podcast.
 func (s *Store) podcastExists(podcastID string) (bool, error) {
-	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM episodes WHERE podcast_id = ?", podcastID).Scan(&count)
+	var exists int
+	err := s.db.QueryRow("SELECT 1 FROM episodes WHERE podcast_id = ? LIMIT 1", podcastID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	return true, nil
 }
 
 // scanEpisode scans a single episode from a row.

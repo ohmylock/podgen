@@ -289,7 +289,7 @@ func (s *Store) getEpisodeByFilenameInTx(tx *bolt.Tx, podcastID, fileName string
 	}
 
 	if episode.Filename == "" {
-		return nil, nil
+		return nil, storage.ErrNotFound
 	}
 
 	return episode, nil
