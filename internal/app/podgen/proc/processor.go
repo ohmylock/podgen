@@ -130,7 +130,7 @@ func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, p
 		tasks := make([]func(ctx context.Context) error, len(chunk))
 		for j, episode := range chunk {
 			tasks[j] = func(ctx context.Context) error {
-				log.Printf("[INFO] Started delete episode %s - %s", podcastID, episode.Filename)
+				// Note: verbose logging removed to avoid interfering with progress bar display
 				if p.Progress != nil {
 					p.Progress.StartFile(j, episode.Filename, 0)
 				}
@@ -138,11 +138,7 @@ func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, p
 				if p.Progress != nil {
 					p.Progress.CompleteFile(j, 0, delErr)
 				}
-				if delErr != nil {
-					return delErr
-				}
-				log.Printf("[INFO] Episode deleted %s - %s", episode.Filename, podcastID)
-				return nil
+				return delErr
 			}
 		}
 
@@ -330,7 +326,14 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 				if p.Progress != nil {
 					p.Progress.StartFile(j, episode.Filename, episode.Size)
 				}
-				result, err := p.uploadSingleEpisode(ctx, podcastID, podcastFolder, episode)
+				// Create progress callback for this worker
+				var progressFn ProgressFunc
+				if p.Progress != nil {
+					progressFn = func(uploaded, total int64) {
+						p.Progress.UpdateProgress(j, uploaded, total)
+					}
+				}
+				result, err := p.uploadSingleEpisode(ctx, podcastID, podcastFolder, episode, progressFn)
 				if p.Progress != nil {
 					p.Progress.CompleteFile(j, episode.Size, err)
 				}
@@ -557,8 +560,8 @@ func SanitizeCDATA(s string) string {
 	return strings.ReplaceAll(s, "]]>", "]]]]><![CDATA[>")
 }
 
-func (p *Processor) uploadSingleEpisode(ctx context.Context, podcastID, podcastFolder string, episodeItem *podcast.Episode) (UploadedEpisode, error) {
-	log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
+func (p *Processor) uploadSingleEpisode(ctx context.Context, podcastID, podcastFolder string, episodeItem *podcast.Episode, progress ProgressFunc) (UploadedEpisode, error) {
+	// Check if file already exists on S3 with same size
 	objectInfo, _ := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
 	var location string
 	if objectInfo != nil && episodeItem.Size == objectInfo.Size {
@@ -566,16 +569,17 @@ func (p *Processor) uploadSingleEpisode(ctx context.Context, podcastID, podcastF
 	}
 
 	if location == "" {
-		uploadInfo, err := p.S3Client.UploadEpisode(ctx,
+		// Upload with progress tracking
+		uploadInfo, err := p.S3Client.UploadEpisodeWithProgress(ctx,
 			fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
-			fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, episodeItem.Filename))
+			fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, episodeItem.Filename),
+			progress)
 		if err != nil {
 			return UploadedEpisode{}, err
 		}
 		location = uploadInfo.Location
 	}
 
-	log.Printf("[INFO] Episode uploaded %s - %s", episodeItem.Filename, location)
 	return UploadedEpisode{
 		PodcastID: podcastID,
 		Filename:  episodeItem.Filename,

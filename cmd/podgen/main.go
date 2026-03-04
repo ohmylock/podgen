@@ -7,7 +7,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
+	"unicode"
 
 	"github.com/jessevdk/go-flags"
 	"podgen/internal/app/podgen"
@@ -31,6 +34,8 @@ var opts struct {
 	RollbackBySession string `long:"rollback-session" description:"Rollback by session name"`
 	ShowRSS           bool   `long:"rss" description:"Show RSS feed URL for podcasts"`
 	MigrateFrom       string `long:"migrate-from" description:"Migrate data from another database (format: type:path, e.g., bolt:/path/to/db)"`
+	AddPodcast        string `long:"add-podcast" description:"Add new podcast from folder name"`
+	PodcastTitle      string `long:"title" description:"Title for new podcast (used with --add-podcast)"`
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
 }
 
@@ -60,6 +65,14 @@ func main() {
 		conf := loadConfig(true)
 		if err := runMigration(conf); err != nil {
 			log.Fatalf("[ERROR] migration failed: %v", err)
+		}
+		return
+	}
+
+	// Handle add-podcast command
+	if opts.AddPodcast != "" {
+		if err := runAddPodcast(); err != nil {
+			log.Fatalf("[ERROR] %v", err)
 		}
 		return
 	}
@@ -266,6 +279,70 @@ func runMigration(conf *configs.Conf) error {
 	log.Printf("[INFO] Migration complete: %d podcasts (%d failed), %d episodes migrated, %d failed",
 		stats.PodcastsProcessed, stats.PodcastsFailed, stats.EpisodesMigrated, stats.EpisodesFailed)
 
+	return nil
+}
+
+// runAddPodcast adds a new podcast entry to the config file.
+func runAddPodcast() error {
+	folderName := opts.AddPodcast
+	podcastID := strings.ToLower(folderName)
+
+	// Load existing config
+	configFile := opts.Conf
+	if !proc.CheckFileExists(configFile) {
+		configFile = "configs/podgen.yml"
+	}
+	if !proc.CheckFileExists(configFile) {
+		return fmt.Errorf("config file not found: %s", opts.Conf)
+	}
+
+	conf, err := configs.Load(configFile)
+	if err != nil {
+		return fmt.Errorf("can't load config: %w", err)
+	}
+
+	// Check if podcast ID already exists
+	if _, exists := conf.Podcasts[podcastID]; exists {
+		return fmt.Errorf("podcast %q already exists in config", podcastID)
+	}
+
+	// Check if folder exists in storage
+	storagePath := conf.Storage.Folder
+	if storagePath == "" {
+		storagePath = "storage"
+	}
+	folderPath := filepath.Join(storagePath, folderName)
+	if !proc.CheckFileExists(folderPath) {
+		return fmt.Errorf("folder %q not found in storage (%s)", folderName, storagePath)
+	}
+
+	// Generate title: capitalize first letter if not provided
+	title := opts.PodcastTitle
+	if title == "" {
+		runes := []rune(folderName)
+		if len(runes) > 0 {
+			runes[0] = unicode.ToUpper(runes[0])
+		}
+		title = string(runes)
+	}
+
+	// Initialize podcasts map if nil
+	if conf.Podcasts == nil {
+		conf.Podcasts = make(map[string]configs.Podcast)
+	}
+
+	// Create new podcast entry
+	conf.Podcasts[podcastID] = configs.Podcast{
+		Title:  title,
+		Folder: folderName,
+	}
+
+	// Save config
+	if err := conf.Save(configFile); err != nil {
+		return fmt.Errorf("can't save config: %w", err)
+	}
+
+	log.Printf("[INFO] Added podcast %q (title: %q, folder: %q) to %s", podcastID, title, folderName, configFile)
 	return nil
 }
 

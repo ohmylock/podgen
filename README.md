@@ -47,21 +47,27 @@ podcasts:
     max_size: 10000000 # Optional. Max size limit to upload by once
     delete_old_episodes: true # Need to delete episodes before to upload new
     info: # Information in podcast feed
-      author: user1 # Author of the podcast 
+      author: user1 # Author of the podcast
       owner: user1 # Owner of the podcast
       email: podgen-user@localhost.com # Email of the owner of the podcast
-      category: History # Podcast category. You can read all categories in apple support information https://podcasters.apple.com/support/1691-apple-podcasts-categories 
+      category: History # Podcast category. You can read all categories in apple support information https://podcasters.apple.com/support/1691-apple-podcasts-categories
+      language: en # Optional. Language code for RSS feed (e.g., en, ru, de) 
 
 database:
   type: "sqlite"        # Storage backend: sqlite (default) or bolt
   path: "podgen.db"     # File path for sqlite/bolt databases
 
-# Legacy option (deprecated, use database.path instead):
+# Legacy option (deprecated, use database section instead):
 # db: "podgen.bdb"
+# WARNING: The legacy db: field ALWAYS uses BoltDB regardless of file extension.
+# To use SQLite, you MUST use the database section above.
+
+storage:
+  folder: "episodes" # Local folder where MP3 files are stored for scanning
 
 upload:
   chunk_size: 3 # How many episodes uploaded on stream
-  
+
 cloud_storage:
   endpoint_url: "s3.aws.com" # S3 storage endpoint url
   bucket: "podgen_bucket" # S3 storage bucket
@@ -70,6 +76,24 @@ cloud_storage:
     aws_key: "i8JFVo4fXxTCbqjU89" # S3 storage uploader aws key
     aws_secret: "egUiXQ6HFmmEY77r3j_W9ML74CkPHLw7P" # S3 storage uploader aws secret
 ```
+
+## Environment Variables
+
+Configuration can be overridden via environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `PODGEN_CONF` | Path to config file (default: `podgen.yml`) |
+| `PODGEN_DB` | Database file path (overrides config) |
+
+Example:
+```bash
+PODGEN_CONF=/etc/podgen/config.yml PODGEN_DB=/var/lib/podgen/data.sqlite podgen -s -u -a
+```
+
+## Graceful Shutdown
+
+Podgen handles `SIGINT` (Ctrl+C) and `SIGTERM` signals for graceful shutdown. When a signal is received during upload or other operations, the current operation completes before the application exits cleanly.
 
 ## Storage Backends
 
@@ -93,17 +117,48 @@ Or override via CLI: `podgen -d /path/to/database.db`
 
 ### Migrating Between Backends
 
-To migrate data from one storage backend to another:
+To migrate data from one storage backend to another, use the `--migrate-from` flag with `-d` to specify the destination.
+
+**Important:** The source and destination must be different files. BoltDB uses file locking, so you cannot migrate from a file that is also configured as the destination.
+
+#### Migration from BoltDB to SQLite (Recommended)
+
+If you have an existing BoltDB database and want to switch to SQLite:
 
 ```bash
-# Migrate from BoltDB to SQLite
-podgen --migrate-from bolt:/path/to/old.bdb -d /path/to/new.db
+# Step 1: Run migration (type is inferred from file extension)
+podgen --migrate-from=bolt:/path/to/podgen.bdb -d /path/to/podgen.sqlite
 
-# Migrate from SQLite to another SQLite database
-podgen --migrate-from sqlite:/path/to/source.db -d /path/to/dest.db
+# Step 2: Update your podgen.yml to use the new database
 ```
 
-The migration copies all podcasts and episodes from the source to the destination database.
+Update config from:
+```yaml
+db: "podgen.bdb"
+```
+
+To:
+```yaml
+database:
+  type: "sqlite"
+  path: "podgen.sqlite"
+```
+
+#### Other Migration Examples
+
+```bash
+# Migrate from SQLite to another SQLite database
+podgen --migrate-from=sqlite:/path/to/source.db -d /path/to/dest.sqlite
+
+# Migrate from BoltDB to another BoltDB file
+podgen --migrate-from=bolt:/path/to/old.bdb -d /path/to/new.bdb
+```
+
+The database type is automatically inferred from the file extension:
+- `.sqlite`, `.db` → SQLite
+- `.bdb` → BoltDB
+
+The migration copies all podcasts and episodes from the source to the destination database, preserving all metadata.
 
 ## MP3 Metadata Extraction
 

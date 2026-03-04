@@ -69,6 +69,15 @@ func Load(fileName string) (res *Conf, err error) {
 	return res, nil
 }
 
+// Save writes the configuration to a file
+func (c *Conf) Save(fileName string) error {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(fileName, data, 0o644)
+}
+
 // GetStorageType returns the configured storage type, defaulting to "sqlite"
 // For backward compatibility, legacy DB field always defaults to "bolt" since
 // the db: field historically only worked with Bolt backend

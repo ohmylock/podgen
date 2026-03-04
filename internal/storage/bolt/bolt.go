@@ -104,7 +104,6 @@ func (s *Store) saveEpisode(tx *bolt.Tx, podcastID string, episode *podcast.Epis
 		return err
 	}
 
-	log.Printf("[INFO] save episode %s - %s", podcastID, episode.Filename)
 	return bucket.Put(key, jdata)
 }
 

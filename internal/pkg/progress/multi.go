@@ -1,4 +1,3 @@
-// Package progress provides visual progress display for file uploads.
 package progress
 
 import (
@@ -11,9 +10,11 @@ import (
 )
 
 const (
+	// Display widths
 	filenameWidth = 40
 	barWidth      = 20
 	sizeWidth     = 18 // "999.9MB/999.9MB"
+	speedWidth    = 10 // "999.9MB/s"
 )
 
 // WorkerState represents the current state of an upload worker.
@@ -77,6 +78,7 @@ func (m *Multi) UpdateProgress(workerID int, uploaded, total int64) {
 		}
 	}
 
+	// Throttle rendering to avoid excessive updates
 	if time.Since(m.lastRender) > 100*time.Millisecond {
 		m.render()
 	}
@@ -130,8 +132,9 @@ func (m *Multi) Reset(totalTasks int) {
 func (m *Multi) render() {
 	m.clearLines()
 
-	lines := make([]string, 0, 2+len(m.workers))
+	var lines []string
 
+	// Overall progress bar
 	pct := 0
 	if m.total > 0 {
 		pct = m.completed * 100 / m.total
@@ -148,15 +151,19 @@ func (m *Multi) render() {
 		statusParts = append(statusParts, fmt.Sprintf("%d errors", m.errors))
 	}
 
-	lines = append(lines,
-		fmt.Sprintf("\033[1mTotal:\033[0m %s %3d%% │ %s", bar, pct, strings.Join(statusParts, " │ ")),
-		strings.Repeat("─", 80))
+	lines = append(lines, fmt.Sprintf("\033[1mTotal:\033[0m %s %3d%% │ %s",
+		bar, pct, strings.Join(statusParts, " │ ")))
 
+	// Separator
+	lines = append(lines, strings.Repeat("─", 80))
+
+	// Each worker
 	for i, w := range m.workers {
 		line := m.formatWorker(i, w)
 		lines = append(lines, line)
 	}
 
+	// Write all lines
 	for _, line := range lines {
 		fmt.Fprintln(m.out, line)
 	}
@@ -167,32 +174,46 @@ func (m *Multi) render() {
 // clearLines moves cursor up and clears previous output.
 func (m *Multi) clearLines() {
 	for i := 0; i < m.linesWritten; i++ {
-		fmt.Fprint(m.out, "\033[A\033[2K")
+		fmt.Fprint(m.out, "\033[A\033[2K") // move up, clear line
 	}
 }
 
 // formatWorker formats a single worker's progress line.
 func (m *Multi) formatWorker(id int, w WorkerState) string {
 	if !w.Active {
+		// Inactive worker - show idle state
 		idleName := padRight("idle", filenameWidth)
-		return fmt.Sprintf("\033[90m[%d] %s %s %3s │ %-*s\033[0m",
+		return fmt.Sprintf("\033[90m[%d] %s %s %3s │ %-*s │ %*s\033[0m",
 			id+1, idleName, renderBar(0, barWidth), "-",
-			sizeWidth, "-")
+			sizeWidth, "-", speedWidth, "-")
 	}
 
+	// Truncate and pad filename
 	name := truncateString(w.Filename, filenameWidth)
 	name = padRight(name, filenameWidth)
 
+	// Calculate progress percentage
 	pct := 0
 	if w.Total > 0 {
 		pct = int(w.Uploaded * 100 / w.Total)
 	}
 
+	// Calculate speed
+	elapsed := time.Since(w.StartTime).Seconds()
+	speed := "-"
+	if elapsed > 0.5 && w.Uploaded > 0 {
+		bytesPerSec := float64(w.Uploaded) / elapsed
+		speed = formatSpeed(bytesPerSec)
+	}
+
+	// Progress bar
 	bar := renderBar(pct, barWidth)
+
+	// Size info
 	sizeInfo := fmt.Sprintf("%s/%s", formatBytes(w.Uploaded), formatBytes(w.Total))
 
-	return fmt.Sprintf("[%d] %s %s %3d%% │ %-*s",
-		id+1, name, bar, pct, sizeWidth, sizeInfo)
+	return fmt.Sprintf("[%d] %s %s %3d%% │ %-*s │ %*s",
+		id+1, name, bar, pct, sizeWidth, sizeInfo, speedWidth, speed)
 }
 
 // renderBar generates a Unicode progress bar.
@@ -246,4 +267,15 @@ func formatBytes(b int64) string {
 		exp = len("KMGTPE") - 1
 	}
 	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// formatSpeed formats bytes/sec as human-readable speed.
+func formatSpeed(bytesPerSec float64) string {
+	if bytesPerSec < 1024 {
+		return fmt.Sprintf("%.0fB/s", bytesPerSec)
+	}
+	if bytesPerSec < 1024*1024 {
+		return fmt.Sprintf("%.1fKB/s", bytesPerSec/1024)
+	}
+	return fmt.Sprintf("%.1fMB/s", bytesPerSec/(1024*1024))
 }

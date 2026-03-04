@@ -50,6 +50,9 @@ type ObjectStorageMock struct {
 	// UploadEpisodeFunc mocks the UploadEpisode method.
 	UploadEpisodeFunc func(ctx context.Context, objectName string, filePath string) (*proc.UploadResult, error)
 
+	// UploadEpisodeWithProgressFunc mocks the UploadEpisodeWithProgress method.
+	UploadEpisodeWithProgressFunc func(ctx context.Context, objectName string, filePath string, progress proc.ProgressFunc) (*proc.UploadResult, error)
+
 	// UploadFeedFunc mocks the UploadFeed method.
 	UploadFeedFunc func(ctx context.Context, objectName string, filePath string) (*proc.UploadResult, error)
 
@@ -217,6 +220,18 @@ func (mock *ObjectStorageMock) UploadEpisodeCalls() []struct {
 	calls = mock.calls.UploadEpisode
 	mock.lockUploadEpisode.RUnlock()
 	return calls
+}
+
+// UploadEpisodeWithProgress calls UploadEpisodeWithProgressFunc.
+func (mock *ObjectStorageMock) UploadEpisodeWithProgress(ctx context.Context, objectName string, filePath string, progress proc.ProgressFunc) (*proc.UploadResult, error) {
+	if mock.UploadEpisodeWithProgressFunc == nil {
+		// Fallback to UploadEpisodeFunc if WithProgress is not set
+		if mock.UploadEpisodeFunc != nil {
+			return mock.UploadEpisodeFunc(ctx, objectName, filePath)
+		}
+		panic("ObjectStorageMock.UploadEpisodeWithProgressFunc: method is nil but ObjectStorage.UploadEpisodeWithProgress was just called")
+	}
+	return mock.UploadEpisodeWithProgressFunc(ctx, objectName, filePath, progress)
 }
 
 // UploadFeed calls UploadFeedFunc.

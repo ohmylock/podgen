@@ -26,6 +26,7 @@ type EpisodeStore = storage.EpisodeStore
 type ObjectStorage interface {
 	DeleteEpisode(ctx context.Context, objectName string) error
 	UploadEpisode(ctx context.Context, objectName, filePath string) (*UploadResult, error)
+	UploadEpisodeWithProgress(ctx context.Context, objectName, filePath string, progress ProgressFunc) (*UploadResult, error)
 	UploadImage(ctx context.Context, objectName, filePath string) (*UploadResult, error)
 	UploadFeed(ctx context.Context, objectName, filePath string) (*UploadResult, error)
 	GetObjectInfo(ctx context.Context, objectName string) (*ObjectInfo, error)

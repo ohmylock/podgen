@@ -176,7 +176,6 @@ func (s *Store) SaveEpisode(podcastID string, episode *podcast.Episode) error {
 		return fmt.Errorf("failed to save episode: %w", err)
 	}
 
-	log.Printf("[INFO] save episode %s - %s", podcastID, episode.Filename)
 	return nil
 }
 
