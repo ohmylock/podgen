@@ -6,12 +6,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"os"
-	"path"
 	"strings"
-	"time"
 
-	"github.com/boltdb/bolt"
 	log "github.com/go-pkgz/lgr"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -31,23 +27,6 @@ type App struct {
 func NewApplication(conf *configs.Conf, p *proc.Processor) (*App, error) {
 	app := App{config: conf, processor: p}
 	return &app, nil
-}
-
-// NewBoltDB create boltDb instance
-func NewBoltDB(dbFile string) (*bolt.DB, error) {
-	log.Printf("[INFO] bolt (persistent) store, %s", dbFile)
-	if dbFile == "" {
-		return nil, fmt.Errorf("empty db")
-	}
-	if err := os.MkdirAll(path.Dir(dbFile), 0o700); err != nil {
-		return nil, err
-	}
-	db, err := bolt.Open(dbFile, 0o600, &bolt.Options{Timeout: 1 * time.Second}) // nolint
-	if err != nil {
-		return nil, err
-	}
-
-	return db, err
 }
 
 // NewS3Client create s3 client instance
