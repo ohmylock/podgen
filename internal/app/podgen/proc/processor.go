@@ -17,6 +17,7 @@ type Processor struct {
 	Storage     EpisodeStore
 	Files       FileScanner
 	S3Client    ObjectStorage
+	Progress    ProgressReporter
 	StoragePath string
 	ChunkSize   int
 }
@@ -78,6 +79,13 @@ func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, p
 		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
+	if len(episodes) == 0 {
+		log.Printf("[INFO] No old episodes to delete for %s", podcastID)
+		return nil
+	}
+
+	log.Printf("[INFO] Found %d old episodes to delete for %s", len(episodes), podcastID)
+
 	// parallel S3 deletes - track which episodes were successfully deleted
 	type deleteResult struct {
 		filename string
@@ -90,8 +98,15 @@ func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, p
 		results[i].filename = episode.Filename
 		tasks[i] = func(ctx context.Context) error {
 			log.Printf("[INFO] Started delete episode %s - %s", podcastID, episode.Filename)
-			if err := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episode.Filename)); err != nil {
-				return err
+			if p.Progress != nil {
+				p.Progress.StartFile(i, episode.Filename, 0)
+			}
+			delErr := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episode.Filename))
+			if p.Progress != nil {
+				p.Progress.CompleteFile(i, 0, delErr)
+			}
+			if delErr != nil {
+				return delErr
 			}
 			log.Printf("[INFO] Episode deleted %s - %s", episode.Filename, podcastID)
 			return nil
@@ -99,6 +114,9 @@ func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, p
 	}
 
 	errs := RunParallel(ctx, p.ChunkSize, tasks)
+	if p.Progress != nil {
+		p.Progress.Finish()
+	}
 
 	// mark successful results
 	for i, err := range errs {
@@ -231,6 +249,13 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
+	if len(episodes) == 0 {
+		log.Printf("[INFO] No new episodes to upload for %s", podcastID)
+		return nil
+	}
+
+	log.Printf("[INFO] Found %d episodes to upload for %s", len(episodes), podcastID)
+
 	// process in chunks - parallel S3 uploads, then sequential DB updates
 	for i := 0; i < len(episodes); i += p.ChunkSize {
 		select {
@@ -250,7 +275,13 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 		tasks := make([]func(ctx context.Context) error, len(chunk))
 		for j, episode := range chunk {
 			tasks[j] = func(ctx context.Context) error {
+				if p.Progress != nil {
+					p.Progress.StartFile(j, episode.Filename, episode.Size)
+				}
 				result, err := p.uploadSingleEpisode(ctx, podcastID, podcastFolder, episode)
+				if p.Progress != nil {
+					p.Progress.CompleteFile(j, episode.Size, err)
+				}
 				if err != nil {
 					return err
 				}
@@ -279,6 +310,9 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 				return fmt.Errorf("can't save episode %s, %w", episode.Filename, err)
 			}
 		}
+	}
+	if p.Progress != nil {
+		p.Progress.Finish()
 	}
 	return nil
 }
@@ -399,6 +433,15 @@ func (p *Processor) getFeedKey(podcastID string) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// GetFeedURL returns the RSS feed URL for a podcast
+func (p *Processor) GetFeedURL(podcastID, podcastFolder, baseURL, bucket string) (string, error) {
+	feedKey, err := p.getFeedKey(podcastID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("https://%s/%s/%s/%s.rss", baseURL, bucket, podcastFolder, feedKey), nil
 }
 
 func (p *Processor) uploadSingleEpisode(ctx context.Context, podcastID, podcastFolder string, episodeItem *podcast.Episode) (UploadedEpisode, error) {
