@@ -22,3 +22,6 @@ dist/
 /.claude/
 # ralphex progress logs
 progress*.txt
+
+# test coverage
+coverage.out

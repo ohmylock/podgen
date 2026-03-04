@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	log "github.com/go-pkgz/lgr"
-
-	"podgen/internal/app/podgen/podcast"
 )
 
 // MigrateStats holds statistics about a migration operation.
@@ -68,7 +66,7 @@ func migratePodcast(from, to Store, podcastID string) (migrated, failed int, err
 	}
 
 	for _, episode := range episodes {
-		if err := saveEpisodeWithRetry(to, podcastID, episode); err != nil {
+		if err := to.SaveEpisode(podcastID, episode); err != nil {
 			log.Printf("[WARN] Failed to migrate episode %s/%s: %v", podcastID, episode.Filename, err)
 			failed++
 			continue
@@ -77,11 +75,6 @@ func migratePodcast(from, to Store, podcastID string) (migrated, failed int, err
 	}
 
 	return migrated, failed, nil
-}
-
-// saveEpisodeWithRetry attempts to save an episode to the destination store.
-func saveEpisodeWithRetry(to Store, podcastID string, episode *podcast.Episode) error {
-	return to.SaveEpisode(podcastID, episode)
 }
 
 // MigrateWithProgress transfers data with progress callback.

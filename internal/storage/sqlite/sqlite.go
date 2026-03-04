@@ -4,6 +4,8 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	log "github.com/go-pkgz/lgr"
 	_ "modernc.org/sqlite"
@@ -31,6 +33,13 @@ func New(cfg storage.Config) *Store {
 
 // Open initializes the SQLite database connection with WAL mode.
 func (s *Store) Open() error {
+	// Create parent directories if they don't exist
+	if dir := filepath.Dir(s.dsn); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("failed to create db directory: %w", err)
+		}
+	}
+
 	dsn := fmt.Sprintf("file:%s?cache=shared&mode=rwc", s.dsn)
 
 	db, err := sql.Open("sqlite", dsn)
