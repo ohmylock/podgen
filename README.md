@@ -17,19 +17,21 @@ Podcast Generator is simple application for upload some episodes to s3 storage a
 
 ```
 Application options:
-  -c, --conf= config file (yml). Default podgen.yml
-  -d, --db= path to bolddb file.
-  -s, --scan= Find and add new episodes.
-  -u, --upload= Upload episodes.
-  -i, --image= Upload podcast's cover.
-  -p, --podcast= Put podcasts code from yaml file (separator quota)
-  -a, --all All podcasts.
+  -c, --conf=             config file (yml). Default podgen.yml
+  -d, --db=               database file path (overrides config)
+  -s, --scan              Find and add new episodes
+  -u, --upload            Upload episodes
+  -f, --feed              Regenerate feeds
+  -i, --image             Upload podcast's cover
+  -p, --podcast=          Podcasts name (separator quota)
+  -a, --all               All podcasts
   -r, --rollback          Rollback last episode
       --rollback-session= Rollback by session name
-  
+      --rss               Show RSS feed URL for podcasts
+      --migrate-from=     Migrate data from another database (format: type:path)
 
 Help Options:
-  -h, --help    Show this help message
+  -h, --help              Show this help message
 ```
 
 
@@ -50,7 +52,13 @@ podcasts:
       email: podgen-user@localhost.com # Email of the owner of the podcast
       category: History # Podcast category. You can read all categories in apple support information https://podcasters.apple.com/support/1691-apple-podcasts-categories 
 
-db: "podgen.bdb" # Path to bolt db file
+database:
+  type: "sqlite"        # Storage backend: sqlite (default), bolt, or postgres
+  path: "podgen.db"     # File path for sqlite/bolt databases
+
+# Legacy option (deprecated, use database.path instead):
+# db: "podgen.bdb"
+
 upload:
   chunk_size: 3 # How many episodes uploaded on stream
   
@@ -62,6 +70,41 @@ cloud_storage:
     aws_key: "i8JFVo4fXxTCbqjU89" # S3 storage uploader aws key
     aws_secret: "egUiXQ6HFmmEY77r3j_W9ML74CkPHLw7P" # S3 storage uploader aws secret
 ```
+
+## Storage Backends
+
+Podgen supports multiple database backends for storing episode metadata:
+
+- **SQLite** (default) - Recommended for most users. Uses WAL mode for high performance and concurrent reads.
+- **BoltDB** - Legacy embedded key-value store. Still supported for backwards compatibility.
+- **PostgreSQL** - For production deployments requiring a dedicated database server.
+
+### Configuring Storage
+
+In `podgen.yml`:
+
+```yaml
+database:
+  type: "sqlite"        # Options: sqlite, bolt, postgres
+  path: "podgen.db"     # File path for sqlite/bolt
+  # dsn: "postgres://user:pass@host/db"  # For postgres
+```
+
+Or override via CLI: `podgen -d /path/to/database.db`
+
+### Migrating Between Backends
+
+To migrate data from one storage backend to another:
+
+```bash
+# Migrate from BoltDB to SQLite
+podgen --migrate-from bolt:/path/to/old.bdb -d /path/to/new.db
+
+# Migrate from SQLite to another SQLite database
+podgen --migrate-from sqlite:/path/to/source.db -d /path/to/dest.db
+```
+
+The migration copies all podcasts and episodes from the source to the destination database.
 
 ## MP3 Metadata Extraction
 
