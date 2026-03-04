@@ -3,7 +3,6 @@ package bolt
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -281,7 +280,7 @@ func (s *Store) getEpisodeByFilenameInTx(tx *bolt.Tx, podcastID, fileName string
 
 	item := bucket.Get(key)
 	if item == nil {
-		return nil, errors.New("no episode found")
+		return nil, storage.ErrNotFound
 	}
 
 	if err = json.Unmarshal(item, episode); err != nil {

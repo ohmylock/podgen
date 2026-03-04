@@ -27,8 +27,8 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 		return nil, err
 	}
 	var re = regexp.MustCompile(`(?m)([12]\d{3}-(0[1-9]|1[012])-(0[1-9]|[12]\d|3[01]))`)
-	var result = make([]*podcast.Episode, len(entities))
-	for i, entity := range entities {
+	var result []*podcast.Episode
+	for _, entity := range entities {
 		if entity.IsDir() {
 			continue
 		}
@@ -74,7 +74,7 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 			}
 		}
 
-		result[i] = &podcast.Episode{
+		result = append(result, &podcast.Episode{
 			Filename: entity.Name(),
 			Size:     entityInfo.Size(),
 			Status:   podcast.New,
@@ -85,13 +85,10 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 			Year:     meta.Year,
 			Comment:  meta.Comment,
 			Duration: meta.Duration,
-		}
+		})
 	}
 
 	sort.SliceStable(result, func(i, j int) bool {
-		if result[i] == nil || result[j] == nil {
-			return false
-		}
 		return result[i].Filename < result[j].Filename
 	})
 

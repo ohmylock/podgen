@@ -3,6 +3,7 @@ package configs
 
 import (
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -92,7 +93,7 @@ func (c *Conf) GetStorageDSN() string {
 	}
 	// Default: podgen.db in storage folder
 	if c.Storage.Folder != "" {
-		return c.Storage.Folder + "/podgen.db"
+		return filepath.Join(c.Storage.Folder, "podgen.db")
 	}
 	return "podgen.db"
 }
