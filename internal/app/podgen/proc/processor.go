@@ -358,7 +358,8 @@ func (p *Processor) GenerateFeed(_ context.Context, podcastID string, podcastEnt
 	header = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
 		"<rss xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\" " +
 		"xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:atom=\"http://www.w3.org/2005/Atom\" " +
-		"xmlns:googleplay=\"http://www.google.com/schemas/play-podcasts/1.0\" version=\"2.0\">\n" +
+		"xmlns:googleplay=\"http://www.google.com/schemas/play-podcasts/1.0\" " +
+		"xmlns:media=\"http://search.yahoo.com/mrss/\" version=\"2.0\">\n" +
 		"<channel>\n" +
 		fmt.Sprintf("<title>%s</title>\n<description><![CDATA[%s]]></description>\n", podcastEntity.Title, podcastEntity.Title) +
 		"<generator>PodGen</generator>\n" +

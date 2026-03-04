@@ -3,6 +3,7 @@ module podgen
 go 1.25
 
 require (
+	github.com/bogem/id3v2/v2 v2.1.4
 	github.com/boltdb/bolt v1.3.1
 	github.com/go-pkgz/lgr v0.10.4
 	github.com/jessevdk/go-flags v1.5.0
@@ -12,7 +13,6 @@ require (
 )
 
 require (
-	github.com/bogem/id3v2/v2 v2.1.4 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/google/uuid v1.1.2 // indirect
