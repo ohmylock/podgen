@@ -532,6 +532,160 @@ func TestProcessor_UploadFeed(t *testing.T) {
 	}
 }
 
+func TestProcessor_UploadNewEpisodes_WithProgress(t *testing.T) {
+	episodes := []*podcast.Episode{
+		{Filename: "ep1.mp3", Size: 1000, Status: podcast.New},
+		{Filename: "ep2.mp3", Size: 2000, Status: podcast.New},
+	}
+
+	store := &mocks.EpisodeStoreMock{
+		FindEpisodesBySizeLimitFunc: func(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
+			return episodes, nil
+		},
+		GetEpisodeByFilenameFunc: func(podcastID string, fileName string) (*podcast.Episode, error) {
+			for _, ep := range episodes {
+				if ep.Filename == fileName {
+					epCopy := *ep
+					return &epCopy, nil
+				}
+			}
+			return nil, errors.New("not found")
+		},
+		SaveEpisodeFunc: func(podcastID string, episode *podcast.Episode) error {
+			return nil
+		},
+	}
+
+	s3 := &mocks.ObjectStorageMock{
+		GetObjectInfoFunc: func(ctx context.Context, objectName string) (*proc.ObjectInfo, error) {
+			return nil, errors.New("not found")
+		},
+		UploadEpisodeFunc: func(ctx context.Context, objectName string, filePath string) (*proc.UploadResult, error) {
+			return &proc.UploadResult{Location: "https://s3/bucket/" + objectName}, nil
+		},
+	}
+
+	progress := &mocks.ProgressReporterMock{
+		StartFileFunc:    func(workerID int, filename string, totalSize int64) {},
+		CompleteFileFunc: func(workerID int, fileSize int64, err error) {},
+		FinishFunc:       func() {},
+	}
+
+	p := &proc.Processor{
+		Storage:     store,
+		S3Client:    s3,
+		Progress:    progress,
+		StoragePath: "/tmp/storage",
+		ChunkSize:   2,
+	}
+
+	err := p.UploadNewEpisodes(context.Background(), "sess1", "pod1", "folder1", 100000)
+	require.NoError(t, err)
+
+	startCalls := progress.StartFileCalls()
+	completeCalls := progress.CompleteFileCalls()
+	finishCalls := progress.FinishCalls()
+
+	assert.Len(t, startCalls, 2)
+	assert.Len(t, completeCalls, 2)
+	assert.Len(t, finishCalls, 1)
+
+	for _, c := range completeCalls {
+		assert.NoError(t, c.Err)
+	}
+}
+
+func TestProcessor_DeleteOldEpisodesByPodcast_WithProgress(t *testing.T) {
+	episodes := []*podcast.Episode{
+		{Filename: "ep1.mp3", Size: 1000, Status: podcast.Uploaded},
+	}
+
+	store := &mocks.EpisodeStoreMock{
+		FindEpisodesByStatusFunc: func(podcastID string, status podcast.Status) ([]*podcast.Episode, error) {
+			return episodes, nil
+		},
+		GetEpisodeByFilenameFunc: func(podcastID string, fileName string) (*podcast.Episode, error) {
+			for _, ep := range episodes {
+				if ep.Filename == fileName {
+					return ep, nil
+				}
+			}
+			return nil, errors.New("not found")
+		},
+		SaveEpisodeFunc: func(podcastID string, episode *podcast.Episode) error {
+			return nil
+		},
+	}
+
+	s3 := &mocks.ObjectStorageMock{
+		DeleteEpisodeFunc: func(ctx context.Context, objectName string) error {
+			return nil
+		},
+	}
+
+	progress := &mocks.ProgressReporterMock{
+		StartFileFunc:    func(workerID int, filename string, totalSize int64) {},
+		CompleteFileFunc: func(workerID int, fileSize int64, err error) {},
+		FinishFunc:       func() {},
+	}
+
+	p := &proc.Processor{
+		Storage:   store,
+		S3Client:  s3,
+		Progress:  progress,
+		ChunkSize: 2,
+	}
+
+	err := p.DeleteOldEpisodesByPodcast(context.Background(), "pod1", "folder1")
+	require.NoError(t, err)
+
+	assert.Len(t, progress.StartFileCalls(), 1)
+	assert.Len(t, progress.CompleteFileCalls(), 1)
+	assert.Len(t, progress.FinishCalls(), 1)
+	assert.Equal(t, "ep1.mp3", progress.StartFileCalls()[0].Filename)
+	assert.NoError(t, progress.CompleteFileCalls()[0].Err)
+}
+
+func TestProcessor_UploadNewEpisodes_NoProgress(t *testing.T) {
+	// Verify nil Progress field causes no panic
+	episodes := []*podcast.Episode{
+		{Filename: "ep1.mp3", Size: 1000, Status: podcast.New},
+	}
+
+	store := &mocks.EpisodeStoreMock{
+		FindEpisodesBySizeLimitFunc: func(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
+			return episodes, nil
+		},
+		GetEpisodeByFilenameFunc: func(podcastID string, fileName string) (*podcast.Episode, error) {
+			epCopy := *episodes[0]
+			return &epCopy, nil
+		},
+		SaveEpisodeFunc: func(podcastID string, episode *podcast.Episode) error {
+			return nil
+		},
+	}
+
+	s3 := &mocks.ObjectStorageMock{
+		GetObjectInfoFunc: func(ctx context.Context, objectName string) (*proc.ObjectInfo, error) {
+			return nil, errors.New("not found")
+		},
+		UploadEpisodeFunc: func(ctx context.Context, objectName string, filePath string) (*proc.UploadResult, error) {
+			return &proc.UploadResult{Location: "https://s3/bucket/" + objectName}, nil
+		},
+	}
+
+	p := &proc.Processor{
+		Storage:     store,
+		S3Client:    s3,
+		StoragePath: "/tmp/storage",
+		ChunkSize:   2,
+		// Progress is nil - should not panic
+	}
+
+	err := p.UploadNewEpisodes(context.Background(), "sess1", "pod1", "folder1", 100000)
+	require.NoError(t, err)
+}
+
 func TestProcessor_GenerateFeed(t *testing.T) {
 	t.Run("find episodes error", func(t *testing.T) {
 		store := &mocks.EpisodeStoreMock{

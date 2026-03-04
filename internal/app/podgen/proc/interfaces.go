@@ -40,3 +40,11 @@ type ObjectStorage interface {
 type FileScanner interface {
 	FindEpisodes(folderName string) ([]*podcast.Episode, error)
 }
+
+// ProgressReporter defines the interface for tracking upload/delete progress.
+type ProgressReporter interface {
+	StartFile(workerID int, filename string, totalSize int64)
+	UpdateProgress(workerID int, uploaded, total int64)
+	CompleteFile(workerID int, fileSize int64, err error)
+	Finish()
+}
