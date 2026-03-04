@@ -89,6 +89,7 @@ func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, p
 	log.Printf("[INFO] Found %d old episodes to delete for %s", len(episodes), podcastID)
 	if p.Progress != nil {
 		p.Progress.Reset(len(episodes))
+		defer p.Progress.Finish()
 	}
 
 	// ensure valid chunk size to avoid division by zero
@@ -169,16 +170,16 @@ func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, p
 				deleteErrs = append(deleteErrs, fmt.Errorf("get episode %s: %w", results[j].filename, err))
 				continue
 			}
+			if episode == nil {
+				log.Printf("[WARN] episode not found after delete: %s - %s", podcastID, results[j].filename)
+				continue
+			}
 			episode.Status = podcast.Deleted
 			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
 				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
 				deleteErrs = append(deleteErrs, fmt.Errorf("save episode %s: %w", episode.Filename, err))
 			}
 		}
-	}
-
-	if p.Progress != nil {
-		p.Progress.Finish()
 	}
 
 	return errors.Join(deleteErrs...)
@@ -296,6 +297,7 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 	log.Printf("[INFO] Found %d episodes to upload for %s", len(episodes), podcastID)
 	if p.Progress != nil {
 		p.Progress.Reset(len(episodes))
+		defer p.Progress.Finish()
 	}
 
 	var uploadErrs []error
@@ -354,6 +356,9 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 			if err != nil {
 				return fmt.Errorf("can't get episode by filename %s, %w", uploaded.Filename, err)
 			}
+			if episode == nil {
+				return fmt.Errorf("episode not found after upload: %s", uploaded.Filename)
+			}
 			episode.Session = session
 			episode.Status = podcast.Uploaded
 			episode.Location = uploaded.Location
@@ -361,9 +366,6 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 				return fmt.Errorf("can't save episode %s, %w", episode.Filename, err)
 			}
 		}
-	}
-	if p.Progress != nil {
-		p.Progress.Finish()
 	}
 	return errors.Join(uploadErrs...)
 }
