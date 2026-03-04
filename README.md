@@ -53,7 +53,7 @@ podcasts:
       category: History # Podcast category. You can read all categories in apple support information https://podcasters.apple.com/support/1691-apple-podcasts-categories 
 
 database:
-  type: "sqlite"        # Storage backend: sqlite (default), bolt, or postgres
+  type: "sqlite"        # Storage backend: sqlite (default) or bolt
   path: "podgen.db"     # File path for sqlite/bolt databases
 
 # Legacy option (deprecated, use database.path instead):
@@ -77,7 +77,7 @@ Podgen supports multiple database backends for storing episode metadata:
 
 - **SQLite** (default) - Recommended for most users. Uses WAL mode for high performance and concurrent reads.
 - **BoltDB** - Legacy embedded key-value store. Still supported for backwards compatibility.
-- **PostgreSQL** - For production deployments requiring a dedicated database server.
+- **PostgreSQL** (planned) - For production deployments requiring a dedicated database server. Not yet implemented.
 
 ### Configuring Storage
 
@@ -85,9 +85,8 @@ In `podgen.yml`:
 
 ```yaml
 database:
-  type: "sqlite"        # Options: sqlite, bolt, postgres
+  type: "sqlite"        # Options: sqlite, bolt
   path: "podgen.db"     # File path for sqlite/bolt
-  # dsn: "postgres://user:pass@host/db"  # For postgres
 ```
 
 Or override via CLI: `podgen -d /path/to/database.db`
