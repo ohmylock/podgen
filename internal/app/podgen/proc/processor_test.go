@@ -168,13 +168,14 @@ func TestProcessor_DeleteOldEpisodesByPodcast(t *testing.T) {
 			wantErr:       true,
 		},
 		{
-			name:          "delete error is logged but does not fail",
+			name:          "delete error is propagated",
 			podcastID:     "pod1",
 			podcastFolder: "folder1",
 			episodes: []*podcast.Episode{
 				{Filename: "ep1.mp3", Size: 1000, Status: podcast.Uploaded},
 			},
 			deleteErr: errors.New("s3 delete failed"),
+			wantErr:   true,
 		},
 	}
 
@@ -493,7 +494,7 @@ func TestProcessor_UploadFeed(t *testing.T) {
 		feedName  string
 		uploadRes *proc.UploadResult
 		uploadErr error
-		wantNil   bool
+		wantErr   bool
 	}{
 		{
 			name:      "successful upload",
@@ -502,11 +503,11 @@ func TestProcessor_UploadFeed(t *testing.T) {
 			uploadRes: &proc.UploadResult{Location: "https://s3/bucket/folder1/feed.rss"},
 		},
 		{
-			name:      "upload error returns nil",
+			name:      "upload error returns error",
 			folder:    "folder1",
 			feedName:  "feed.rss",
 			uploadErr: errors.New("upload failed"),
-			wantNil:   true,
+			wantErr:   true,
 		},
 	}
 
@@ -523,10 +524,12 @@ func TestProcessor_UploadFeed(t *testing.T) {
 				StoragePath: "/tmp/storage",
 			}
 
-			result := p.UploadFeed(context.Background(), tt.folder, tt.feedName)
-			if tt.wantNil {
+			result, err := p.UploadFeed(context.Background(), tt.folder, tt.feedName)
+			if tt.wantErr {
+				require.Error(t, err)
 				assert.Nil(t, result)
 			} else {
+				require.NoError(t, err)
 				assert.NotNil(t, result)
 				assert.Equal(t, tt.uploadRes.Location, result.Location)
 			}
@@ -571,6 +574,7 @@ func TestProcessor_UploadNewEpisodes_WithProgress(t *testing.T) {
 		StartFileFunc:    func(workerID int, filename string, totalSize int64) {},
 		CompleteFileFunc: func(workerID int, fileSize int64, err error) {},
 		FinishFunc:       func() {},
+		ResetFunc:        func(totalTasks int) {},
 	}
 
 	p := &proc.Processor{
@@ -587,10 +591,13 @@ func TestProcessor_UploadNewEpisodes_WithProgress(t *testing.T) {
 	startCalls := progress.StartFileCalls()
 	completeCalls := progress.CompleteFileCalls()
 	finishCalls := progress.FinishCalls()
+	resetCalls := progress.ResetCalls()
 
 	assert.Len(t, startCalls, 2)
 	assert.Len(t, completeCalls, 2)
 	assert.Len(t, finishCalls, 1)
+	assert.Len(t, resetCalls, 1)
+	assert.Equal(t, 2, resetCalls[0].TotalTasks)
 
 	for _, c := range completeCalls {
 		assert.NoError(t, c.Err)
@@ -629,6 +636,7 @@ func TestProcessor_DeleteOldEpisodesByPodcast_WithProgress(t *testing.T) {
 		StartFileFunc:    func(workerID int, filename string, totalSize int64) {},
 		CompleteFileFunc: func(workerID int, fileSize int64, err error) {},
 		FinishFunc:       func() {},
+		ResetFunc:        func(totalTasks int) {},
 	}
 
 	p := &proc.Processor{
@@ -644,8 +652,54 @@ func TestProcessor_DeleteOldEpisodesByPodcast_WithProgress(t *testing.T) {
 	assert.Len(t, progress.StartFileCalls(), 1)
 	assert.Len(t, progress.CompleteFileCalls(), 1)
 	assert.Len(t, progress.FinishCalls(), 1)
+	assert.Len(t, progress.ResetCalls(), 1)
+	assert.Equal(t, 1, progress.ResetCalls()[0].TotalTasks)
 	assert.Equal(t, "ep1.mp3", progress.StartFileCalls()[0].Filename)
 	assert.NoError(t, progress.CompleteFileCalls()[0].Err)
+}
+
+func TestProcessor_DeleteOldEpisodesByPodcast_ZeroChunkSize(t *testing.T) {
+	// Verify ChunkSize=0 doesn't panic and defaults to 1
+	episodes := []*podcast.Episode{
+		{Filename: "ep1.mp3", Size: 1000, Status: podcast.Uploaded},
+		{Filename: "ep2.mp3", Size: 2000, Status: podcast.Uploaded},
+	}
+
+	store := &mocks.EpisodeStoreMock{
+		FindEpisodesByStatusFunc: func(podcastID string, status podcast.Status) ([]*podcast.Episode, error) {
+			return episodes, nil
+		},
+		GetEpisodeByFilenameFunc: func(podcastID string, fileName string) (*podcast.Episode, error) {
+			for _, ep := range episodes {
+				if ep.Filename == fileName {
+					return ep, nil
+				}
+			}
+			return nil, errors.New("not found")
+		},
+		SaveEpisodeFunc: func(podcastID string, episode *podcast.Episode) error {
+			return nil
+		},
+	}
+
+	s3 := &mocks.ObjectStorageMock{
+		DeleteEpisodeFunc: func(ctx context.Context, objectName string) error {
+			return nil
+		},
+	}
+
+	p := &proc.Processor{
+		Storage:   store,
+		S3Client:  s3,
+		ChunkSize: 0, // should not panic, defaults to 1
+	}
+
+	err := p.DeleteOldEpisodesByPodcast(context.Background(), "pod1", "folder1")
+	require.NoError(t, err)
+
+	// verify both episodes were processed
+	saveCalls := store.SaveEpisodeCalls()
+	assert.Len(t, saveCalls, 2)
 }
 
 func TestProcessor_UploadNewEpisodes_NoProgress(t *testing.T) {
@@ -866,12 +920,116 @@ func TestBuildItemDescription(t *testing.T) {
 			episode:  podcast.Episode{Filename: "ep.mp3", Artist: "A", Comment: "C"},
 			wantDesc: "A\nC",
 		},
+		{
+			name:     "CDATA injection in comment is sanitized",
+			episode:  podcast.Episode{Filename: "ep.mp3", Comment: "Test]]><script>alert('xss')</script><![CDATA[end"},
+			wantDesc: "Test]]]]><![CDATA[><script>alert('xss')</script><![CDATA[end",
+		},
+		{
+			name:     "CDATA injection in filename fallback is sanitized",
+			episode:  podcast.Episode{Filename: "test]]>injection.mp3"},
+			wantDesc: "test]]]]><![CDATA[>injection.mp3",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := proc.BuildItemDescription(&tt.episode)
 			assert.Equal(t, tt.wantDesc, result)
+		})
+	}
+}
+
+func TestSanitizeCDATA(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "no injection",
+			input: "normal text",
+			want:  "normal text",
+		},
+		{
+			name:  "single CDATA end sequence",
+			input: "text]]>more",
+			want:  "text]]]]><![CDATA[>more",
+		},
+		{
+			name:  "multiple CDATA end sequences",
+			input: "a]]>b]]>c",
+			want:  "a]]]]><![CDATA[>b]]]]><![CDATA[>c",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "just CDATA end",
+			input: "]]>",
+			want:  "]]]]><![CDATA[>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := proc.SanitizeCDATA(tt.input)
+			assert.Equal(t, tt.want, result)
+		})
+	}
+}
+
+func TestProcessor_GetFeedURL(t *testing.T) {
+	tests := []struct {
+		name          string
+		podcastID     string
+		podcastFolder string
+		baseURL       string
+		bucket        string
+		wantContains  string
+		wantNotDouble bool
+	}{
+		{
+			name:          "baseURL without scheme",
+			podcastID:     "pod1",
+			podcastFolder: "folder1",
+			baseURL:       "s3.example.com",
+			bucket:        "bucket1",
+			wantContains:  "https://s3.example.com/bucket1/folder1/",
+			wantNotDouble: true,
+		},
+		{
+			name:          "baseURL with https scheme is stripped",
+			podcastID:     "pod1",
+			podcastFolder: "folder1",
+			baseURL:       "https://s3.example.com",
+			bucket:        "bucket1",
+			wantContains:  "https://s3.example.com/bucket1/folder1/",
+			wantNotDouble: true,
+		},
+		{
+			name:          "baseURL with http scheme is preserved",
+			podcastID:     "pod1",
+			podcastFolder: "folder1",
+			baseURL:       "http://s3.example.com",
+			bucket:        "bucket1",
+			wantContains:  "http://s3.example.com/bucket1/folder1/",
+			wantNotDouble: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &proc.Processor{}
+			url, err := p.GetFeedURL(tt.podcastID, tt.podcastFolder, tt.baseURL, tt.bucket)
+			require.NoError(t, err)
+			assert.Contains(t, url, tt.wantContains)
+			if tt.wantNotDouble {
+				assert.NotContains(t, url, "https://https://")
+				assert.NotContains(t, url, "https://http://")
+			}
 		})
 	}
 }

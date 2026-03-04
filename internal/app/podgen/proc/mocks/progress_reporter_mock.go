@@ -41,6 +41,9 @@ type ProgressReporterMock struct {
 	// FinishFunc mocks the Finish method.
 	FinishFunc func()
 
+	// ResetFunc mocks the Reset method.
+	ResetFunc func(totalTasks int)
+
 	// calls tracks calls to the methods.
 	calls struct {
 		// StartFile holds details about calls to the StartFile method.
@@ -72,11 +75,17 @@ type ProgressReporterMock struct {
 		}
 		// Finish holds details about calls to the Finish method.
 		Finish []struct{}
+		// Reset holds details about calls to the Reset method.
+		Reset []struct {
+			// TotalTasks is the totalTasks argument value.
+			TotalTasks int
+		}
 	}
 	lockStartFile      sync.RWMutex
 	lockUpdateProgress sync.RWMutex
 	lockCompleteFile   sync.RWMutex
 	lockFinish         sync.RWMutex
+	lockReset          sync.RWMutex
 }
 
 // StartFile calls StartFileFunc.
@@ -208,5 +217,34 @@ func (mock *ProgressReporterMock) FinishCalls() []struct{} {
 	mock.lockFinish.RLock()
 	calls = mock.calls.Finish
 	mock.lockFinish.RUnlock()
+	return calls
+}
+
+// Reset calls ResetFunc.
+func (mock *ProgressReporterMock) Reset(totalTasks int) {
+	if mock.ResetFunc == nil {
+		panic("ProgressReporterMock.ResetFunc: method is nil but ProgressReporter.Reset was just called")
+	}
+	callInfo := struct {
+		TotalTasks int
+	}{
+		TotalTasks: totalTasks,
+	}
+	mock.lockReset.Lock()
+	mock.calls.Reset = append(mock.calls.Reset, callInfo)
+	mock.lockReset.Unlock()
+	mock.ResetFunc(totalTasks)
+}
+
+// ResetCalls gets all the calls that were made to Reset.
+func (mock *ProgressReporterMock) ResetCalls() []struct {
+	TotalTasks int
+} {
+	var calls []struct {
+		TotalTasks int
+	}
+	mock.lockReset.RLock()
+	calls = mock.calls.Reset
+	mock.lockReset.RUnlock()
 	return calls
 }

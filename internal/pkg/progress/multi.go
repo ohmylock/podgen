@@ -106,6 +106,24 @@ func (m *Multi) Finish() {
 	defer m.mu.Unlock()
 
 	m.clearLines()
+	m.linesWritten = 0
+}
+
+// Reset clears state for a new operation with the given total task count.
+func (m *Multi) Reset(totalTasks int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.clearLines()
+	m.total = totalTasks
+	m.completed = 0
+	m.errors = 0
+	m.totalBytes = 0
+	m.startTime = time.Now()
+	m.linesWritten = 0
+	for i := range m.workers {
+		m.workers[i] = WorkerState{}
+	}
 }
 
 // render updates the terminal display.
