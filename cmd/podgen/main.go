@@ -36,6 +36,7 @@ var opts struct {
 	MigrateFrom       string `long:"migrate-from" description:"Migrate data from another database (format: type:path, e.g., bolt:/path/to/db)"`
 	AddPodcast        string `long:"add-podcast" description:"Add new podcast from folder name"`
 	PodcastTitle      string `long:"title" description:"Title for new podcast (used with --add-podcast)"`
+	ForceDelete       bool   `long:"clear" description:"Force delete old episodes before upload (ignores delete_old_episodes setting)"`
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
 }
 
@@ -385,7 +386,11 @@ func runOperations(ctx context.Context, app *podgen.App, podcasts string) int {
 	}
 
 	if opts.Upload {
-		if err := app.DeleteOldEpisodes(ctx, podcasts); err != nil {
+		// Auto-scan before upload to find new episodes
+		if err := app.Update(ctx, podcasts); err != nil {
+			hasError = true
+		}
+		if err := app.DeleteOldEpisodes(ctx, podcasts, opts.ForceDelete); err != nil {
 			hasError = true
 		}
 		if err := app.UploadEpisodes(ctx, podcasts); err != nil {

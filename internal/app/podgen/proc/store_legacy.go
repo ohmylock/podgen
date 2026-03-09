@@ -115,6 +115,7 @@ func (b *BoltDB) changeStatusLegacy(podcastID string, fromStatus, toStatus podca
 }
 
 // findBySizeLimitLegacy implements FindEpisodesBySizeLimit using the legacy DB field.
+// The limit is applied to the total podcast size (uploaded + new episodes).
 func (b *BoltDB) findBySizeLimitLegacy(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
 	var result []*podcast.Episode
 	err := b.DB.View(func(tx *bolt.Tx) error {
@@ -123,10 +124,14 @@ func (b *BoltDB) findBySizeLimitLegacy(podcastID string, status podcast.Status, 
 			log.Printf("[INFO] No episodes with status %d in podcast %s: %v", status, podcastID, err)
 			return nil
 		}
-		var sizes int64
+
+		// Get total size of already uploaded episodes
+		uploadedSize := b.getUploadedSizeInTx(tx, podcastID)
+
+		sizes := uploadedSize
 		result = make([]*podcast.Episode, len(episodes))
 		for i, episode := range episodes {
-			if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) >= sizeLimit) {
+			if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) > sizeLimit) {
 				result = result[:i]
 				return nil
 			}
@@ -136,6 +141,19 @@ func (b *BoltDB) findBySizeLimitLegacy(podcastID string, status podcast.Status, 
 		return nil
 	})
 	return result, err
+}
+
+// getUploadedSizeInTx returns the total size of uploaded episodes for a podcast.
+func (b *BoltDB) getUploadedSizeInTx(tx *bolt.Tx, podcastID string) int64 {
+	episodes, err := b.findByStatusInTx(tx, podcastID, podcast.Uploaded)
+	if err != nil {
+		return 0
+	}
+	var totalSize int64
+	for _, ep := range episodes {
+		totalSize += ep.Size
+	}
+	return totalSize
 }
 
 func (b *BoltDB) findByStatusInTx(tx *bolt.Tx, podcastID string, filterStatus podcast.Status) ([]*podcast.Episode, error) {

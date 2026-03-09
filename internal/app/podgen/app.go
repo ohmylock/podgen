@@ -98,12 +98,13 @@ func (a *App) UploadEpisodes(ctx context.Context, podcastIDs string) error {
 }
 
 // DeleteOldEpisodes delete old episodes by podcasts
-func (a *App) DeleteOldEpisodes(ctx context.Context, podcastIDs string) error {
+// If force is true, deletes for all podcasts regardless of delete_old_episodes config
+func (a *App) DeleteOldEpisodes(ctx context.Context, podcastIDs string, force bool) error {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	var errs []error
 	for i, p := range podcasts {
-		if !p.DeleteOldEpisodes {
+		if !force && !p.DeleteOldEpisodes {
 			continue
 		}
 

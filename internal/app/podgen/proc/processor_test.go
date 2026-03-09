@@ -14,6 +14,7 @@ import (
 	"podgen/internal/app/podgen/proc"
 	"podgen/internal/app/podgen/proc/mocks"
 	"podgen/internal/configs"
+	"podgen/internal/storage"
 )
 
 func TestProcessor_Update(t *testing.T) {
@@ -102,7 +103,7 @@ func TestProcessor_Update(t *testing.T) {
 					}
 					ep, ok := tt.existingEps[fileName]
 					if !ok {
-						return nil, errors.New("no episode found")
+						return nil, storage.ErrNotFound
 					}
 					return ep, nil
 				},

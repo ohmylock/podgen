@@ -242,6 +242,7 @@ func (s *Store) FindEpisodesBySession(podcastID, session string) ([]*podcast.Epi
 }
 
 // FindEpisodesBySizeLimit retrieves episodes up to a total size limit.
+// The limit is applied to the total podcast size (uploaded + new episodes).
 func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
 	if s.db == nil {
 		return nil, storage.ErrClosed
@@ -262,9 +263,15 @@ func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status,
 		return episodes, nil
 	}
 
-	// Apply size limit
+	// Get total size of already uploaded episodes
+	uploadedSize, err := s.getUploadedSize(podcastID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply size limit considering already uploaded episodes
 	var result []*podcast.Episode
-	var totalSize int64
+	totalSize := uploadedSize
 	for _, ep := range episodes {
 		if totalSize >= sizeLimit || (totalSize+ep.Size) > sizeLimit {
 			break
@@ -274,6 +281,17 @@ func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status,
 	}
 
 	return result, nil
+}
+
+// getUploadedSize returns the total size of uploaded episodes for a podcast.
+func (s *Store) getUploadedSize(podcastID string) (int64, error) {
+	query := `SELECT COALESCE(SUM(size), 0) FROM episodes WHERE podcast_id = ? AND status = ?`
+	var totalSize int64
+	err := s.db.QueryRow(query, podcastID, podcast.Uploaded).Scan(&totalSize)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get uploaded size: %w", err)
+	}
+	return totalSize, nil
 }
 
 // GetEpisodeByFilename retrieves an episode by its filename.

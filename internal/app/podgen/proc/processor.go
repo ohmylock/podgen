@@ -12,6 +12,7 @@ import (
 	log "github.com/go-pkgz/lgr"
 	"podgen/internal/app/podgen/podcast"
 	"podgen/internal/configs"
+	"podgen/internal/storage"
 )
 
 // Processor is searcher of episode files and writer to store
@@ -56,8 +57,9 @@ func (p *Processor) Update(ctx context.Context, folderName, podcastID string) (i
 			continue
 		}
 		item, err := p.Storage.GetEpisodeByFilename(podcastID, episode.Filename)
-		if err != nil {
-			log.Printf("get episode by filename error, %v", err)
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
+			log.Printf("[ERROR] get episode by filename error, %v", err)
+			continue
 		}
 
 		if item != nil {
@@ -68,6 +70,7 @@ func (p *Processor) Update(ctx context.Context, folderName, podcastID string) (i
 		if e != nil {
 			return 0, fmt.Errorf("can't add episode %s to %s, %w", episode.Filename, podcastID, e)
 		}
+		log.Printf("[INFO] added new episode: %s", episode.Filename)
 		countNew++
 	}
 

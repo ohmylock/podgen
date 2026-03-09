@@ -222,6 +222,7 @@ func (s *Store) ChangeStatusEpisodes(podcastID string, fromStatus, toStatus podc
 }
 
 // FindEpisodesBySizeLimit retrieves episodes up to a total size limit.
+// The limit is applied to the total podcast size (uploaded + new episodes).
 func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
 	if s.db == nil {
 		return nil, storage.ErrClosed
@@ -234,7 +235,11 @@ func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status,
 			log.Printf("[INFO] No episodes with status %d in podcast %s: %v", status, podcastID, err)
 			return nil
 		}
-		var sizes int64
+
+		// Get total size of already uploaded episodes
+		uploadedSize := s.getUploadedSizeInTx(tx, podcastID)
+
+		sizes := uploadedSize
 		result = make([]*podcast.Episode, len(episodes))
 		for i, episode := range episodes {
 			if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) > sizeLimit) {
@@ -247,6 +252,19 @@ func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status,
 		return nil
 	})
 	return result, err
+}
+
+// getUploadedSizeInTx returns the total size of uploaded episodes for a podcast.
+func (s *Store) getUploadedSizeInTx(tx *bolt.Tx, podcastID string) int64 {
+	episodes, err := s.findEpisodesByStatus(tx, podcastID, podcast.Uploaded)
+	if err != nil {
+		return 0
+	}
+	var totalSize int64
+	for _, ep := range episodes {
+		totalSize += ep.Size
+	}
+	return totalSize
 }
 
 // GetEpisodeByFilename retrieves an episode by its filename.
