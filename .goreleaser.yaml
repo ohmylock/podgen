@@ -1,31 +1,65 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
 builds:
-  - env:
+  - id: podgen
+    main: ./cmd/podgen
+    binary: podgen
+    env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
     goos:
       - linux
       - darwin
       - windows
     goarch:
       - amd64
-      - arm
       - arm64
-    ignore:
-      - goos: freebsd
-        goarch: arm
-      - goos: freebsd
-        goarch: arm64
-    dir: cmd/podgen
-    ldflags: "-s -w -X main.version={{.Tag}}"
 
 archives:
-  - name_template: "{{.ProjectName}}_{{.Tag}}_{{.Os}}_{{.Arch}}"
-    replacements:
-      386: i386
-      amd64: x86_64
-      darwin: macos
+  - id: podgen
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
+    formats:
+      - tar.gz
     files:
       - LICENSE
       - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+brews:
+  - name: podgen
+    repository:
+      owner: ohmylock
+      name: homebrew-tools
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/ohmylock/podgen"
+    description: "Upload MP3 episodes to S3 and generate RSS feeds for podcast players"
+    license: "MIT"
+    install: |
+      bin.install "podgen"
+    test: |
+      system "#{bin}/podgen", "--help"
+
+release:
+  header: |
+    ## What's New
+
+    See [CHANGELOG.md](https://github.com/ohmylock/podgen/blob/main/CHANGELOG.md) for full details.
+  footer: |
+    ---
+    **Full Changelog**: https://github.com/ohmylock/podgen/blob/main/CHANGELOG.md

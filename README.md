@@ -1,16 +1,94 @@
-# Podcast Generator
+<p align="right">
+  <a href="README.ru.md">Читать на русском</a>
+</p>
 
-Podcast Generator is simple application for upload some episodes to s3 storage and generate feed to podcast player.
+<p align="center">
+  <img src="https://img.shields.io/badge/go-1.25+-00ADD8?style=flat&logo=go" alt="Go version 1.25+">
+  <a href="https://github.com/ohmylock/podgen/actions/workflows/ci.yml"><img src="https://github.com/ohmylock/podgen/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
+  <a href="https://github.com/ohmylock/podgen/releases"><img src="https://img.shields.io/github/v/release/ohmylock/podgen?include_prereleases" alt="Latest Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://goreportcard.com/report/github.com/ohmylock/podgen"><img src="https://goreportcard.com/badge/github.com/ohmylock/podgen" alt="Go Report Card"></a>
+</p>
+
+<h1 align="center">podgen</h1>
+
+<p align="center">
+  <b>Podcast Generator — upload episodes to S3 and generate RSS feeds</b><br>
+  <i>CLI tool for podcast management: MP3 scanning, metadata extraction, artwork generation</i>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#configuration">Configuration</a>
+</p>
+
+---
+
+## What is podgen?
+
+**podgen** is a command-line tool for podcast management. It uploads MP3 episodes to S3-compatible storage and generates RSS feeds compatible with Apple Podcasts, Spotify, and other podcast players.
+
+## Quick Start
+
+```bash
+# Install
+brew install ohmylock/tools/podgen
+
+# Scan and upload episodes
+podgen -s -u -p mypodcast
+
+# All podcasts from config
+podgen -s -u -a
+```
 
 ## Features
 
-- Upload MP3 episodes to S3-compatible cloud storage
-- Generate RSS/Atom feeds compatible with podcast players
-- Automatic artwork generation - creates 3000x3000 gradient cover art when no podcast image exists
-- MP3 metadata extraction - reads ID3 tags (title, artist, album, year, comment, duration) to enrich RSS feed descriptions
-- Progress display - visual progress bar during uploads and deletions when running in terminal
-- Rollback support - undo last upload or specific session
-- Multiple podcast support from single configuration
+- **S3 Upload** — any S3-compatible storage (AWS, Minio, Yandex Cloud, etc.)
+- **RSS/Atom Feed** — compatible with Apple Podcasts, Spotify, Google Podcasts
+- **Metadata Extraction** — ID3v2 tags: title, artist, album, year, duration
+- **Artwork Generation** — 3000x3000 PNG with various gradient styles
+- **Progress Bar** — visual upload progress in terminal
+- **Rollback** — undo last upload or specific session
+- **Multiple Podcasts** — single config for multiple podcasts
+- **Graceful Shutdown** — clean exit on Ctrl+C
+
+## Installation
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew install ohmylock/tools/podgen
+```
+
+### Download Binary
+
+Download the appropriate binary for your platform from the [releases](https://github.com/ohmylock/podgen/releases) page:
+
+| Platform | Architecture | File |
+|----------|--------------|------|
+| macOS | Apple Silicon | `podgen_*_darwin_arm64.tar.gz` |
+| macOS | Intel | `podgen_*_darwin_amd64.tar.gz` |
+| Linux | x86_64 | `podgen_*_linux_amd64.tar.gz` |
+| Linux | ARM64 | `podgen_*_linux_arm64.tar.gz` |
+| Windows | x86_64 | `podgen_*_windows_amd64.zip` |
+
+### Go Install
+
+```bash
+go install github.com/ohmylock/podgen/cmd/podgen@latest
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/ohmylock/podgen.git
+cd podgen
+make build
+# binary: bin/podgen
+```
 
 ## Usage
 
@@ -258,3 +336,31 @@ podgen --add myfolder
 The folder must exist in the storage path. The podcast will be added to your config file.
 
 If no `podcast.png` exists in the folder, artwork will be automatically generated.
+
+## Makefile
+
+```bash
+make build          # compile bin/podgen
+make test           # run tests with race detector
+make cover          # tests with coverage report
+make lint           # golangci-lint
+make fmt            # format code
+make install        # install to /usr/local/bin
+make release        # goreleaser release
+make release-check  # goreleaser dry-run
+make clean          # remove build artifacts
+```
+
+## Contributing
+
+Contributions are welcome! Please read the [contributing guide](CONTRIBUTING.md) before submitting a PR.
+
+## License
+
+MIT License — see [LICENSE](LICENSE) file.
+
+---
+
+<p align="center">
+  Made with love for podcasters
+</p>
