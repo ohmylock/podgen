@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/bogem/id3v2/v2 v2.1.4
 	github.com/boltdb/bolt v1.3.1
+	github.com/fogleman/gg v1.3.0
 	github.com/go-pkgz/lgr v0.10.4
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/minio/minio-go/v7 v7.0.31
@@ -17,7 +18,6 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gopherjs/gopherjs v1.17.2 // indirect
