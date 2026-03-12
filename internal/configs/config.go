@@ -34,6 +34,63 @@ func EnsureConfigDir() error {
 	return os.MkdirAll(DefaultConfigDir(), 0o700)
 }
 
+// CreateDefaultConfig creates a template config file if it doesn't exist.
+// Returns true if a new config was created, false if it already exists.
+func CreateDefaultConfig() (bool, error) {
+	configFile := DefaultConfigFile()
+
+	// Check if config already exists
+	if _, err := os.Stat(configFile); err == nil {
+		return false, nil
+	}
+
+	// Ensure directory exists
+	if err := EnsureConfigDir(); err != nil {
+		return false, err
+	}
+
+	// Create template config
+	template := `# podgen configuration
+# Documentation: https://github.com/ohmylock/podgen
+
+# Podcasts configuration
+# Add podcasts using: podgen --add <folder> --title "Podcast Title"
+podcasts: {}
+
+# Local storage folder for MP3 files
+storage:
+  folder: ""
+
+# S3-compatible cloud storage
+cloud_storage:
+  endpoint_url: ""
+  bucket: ""
+  region: ""
+  secrets:
+    aws_key: ""
+    aws_secret: ""
+
+# Database (SQLite by default, stored in ~/.config/podgen/podgen.db)
+# database:
+#   type: sqlite  # or: bolt
+#   path: /custom/path/podgen.db
+
+# Upload settings
+# upload:
+#   chunk_size: 3
+
+# Artwork auto-generation (enabled by default)
+# artwork:
+#   auto_generate: true
+`
+
+	if err := os.WriteFile(configFile, []byte(template), 0o600); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
 // StorageConfig defines database storage configuration
 type StorageConfig struct {
 	// Type specifies the storage backend: sqlite (default), bolt, or postgres

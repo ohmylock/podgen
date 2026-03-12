@@ -12,8 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **XDG-compliant configuration:**
   - Default config location: `~/.config/podgen/config.yaml`
   - Default database location: `~/.config/podgen/podgen.db`
-  - Auto-create config directory on first run
   - Config search priority: `--conf` flag → `~/.config/podgen/` → `./podgen.yml` → `./configs/podgen.yml`
+
+- **First-run experience:**
+  - Auto-create config template on first run
+  - Welcome message with setup instructions
+  - No errors on fresh install
 
 ## [0.1.0] - 2026-03-12
 

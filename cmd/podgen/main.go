@@ -88,6 +88,10 @@ func main() {
 	}
 
 	conf := loadConfig(false)
+	if conf == nil {
+		// First run, welcome message already shown
+		return
+	}
 
 	app, store := setupApplication(conf)
 	defer func() { _ = store.Close() }()
@@ -169,7 +173,26 @@ func loadConfig(forMigration bool) *configs.Conf {
 	}
 
 	if !configExists {
-		log.Fatalf("[ERROR] config file not found. Create config at %s or specify with --conf flag", configs.DefaultConfigFile())
+		// First run: create default config and show welcome message
+		created, err := configs.CreateDefaultConfig()
+		if err != nil {
+			log.Fatalf("[ERROR] failed to create config: %v", err)
+		}
+		if created {
+			fmt.Println()
+			fmt.Println("Welcome to podgen!")
+			fmt.Println()
+			fmt.Printf("Config created: %s\n", configs.DefaultConfigFile())
+			fmt.Println()
+			fmt.Println("Next steps:")
+			fmt.Println("  1. Edit the config file and add your S3 credentials")
+			fmt.Println("  2. Set storage.folder to your MP3 files directory")
+			fmt.Println("  3. Add a podcast: podgen --add <folder> --title \"My Podcast\"")
+			fmt.Println()
+			return nil
+		}
+		// Config should exist now, try to load it
+		configFile = configs.DefaultConfigFile()
 	}
 
 	conf, err := configs.Load(configFile)
