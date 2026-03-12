@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/boltdb/bolt"
+	bolt "go.etcd.io/bbolt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"podgen/internal/app/podgen/podcast"

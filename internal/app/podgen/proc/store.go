@@ -1,7 +1,7 @@
 package proc
 
 import (
-	"github.com/boltdb/bolt"
+	bolt "go.etcd.io/bbolt"
 
 	"podgen/internal/app/podgen/podcast"
 	boltstore "podgen/internal/storage/bolt"

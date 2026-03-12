@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boltdb/bolt"
+	bolt "go.etcd.io/bbolt"
 	log "github.com/go-pkgz/lgr"
 
 	"podgen/internal/app/podgen/podcast"
