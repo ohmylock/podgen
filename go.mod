@@ -6,7 +6,7 @@ require (
 	github.com/bogem/id3v2/v2 v2.1.4
 	github.com/fogleman/gg v1.3.0
 	github.com/go-pkgz/lgr v0.10.4
-	github.com/jessevdk/go-flags v1.5.0
+	github.com/jessevdk/go-flags v1.6.1
 	github.com/minio/minio-go/v7 v7.0.31
 	github.com/stretchr/testify v1.10.0
 	github.com/tcolgate/mp3 v0.0.0-20170426193717-e79c5a46d300
