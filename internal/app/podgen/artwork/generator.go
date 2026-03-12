@@ -367,8 +367,11 @@ func generateAuroraColors(seed string) []color.RGBA {
 
 	for i, hue := range hues {
 		// High saturation, varied lightness for vibrancy
-		saturation := 0.8 + float64(h[i+1]%30)/100.0
-		lightness := 0.45 + float64(h[i+2]%20)/100.0
+		// Use separate indices for saturation and lightness (h is 32 bytes, we use indices 1-8)
+		satIdx := i*2 + 1
+		ligIdx := i*2 + 2
+		saturation := 0.8 + float64(h[satIdx]%30)/100.0
+		lightness := 0.45 + float64(h[ligIdx]%20)/100.0
 		colors[i] = hslToRGBA(hue, saturation, lightness)
 	}
 

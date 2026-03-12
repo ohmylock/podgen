@@ -1,6 +1,7 @@
 package sqlite_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -653,7 +654,7 @@ func TestConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func(idx int) {
 			ep := &podcast.Episode{
-				Filename: "concurrent-ep" + string(rune('0'+idx)) + ".mp3",
+				Filename: fmt.Sprintf("concurrent-ep%d.mp3", idx),
 				Status:   podcast.New,
 			}
 			_ = store.SaveEpisode(podcastID, ep)
