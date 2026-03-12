@@ -93,6 +93,17 @@ func main() {
 		return
 	}
 
+	// If no podcasts configured, show helpful message
+	if len(conf.Podcasts) == 0 {
+		fmt.Println("No podcasts configured yet.")
+		fmt.Println()
+		fmt.Println("Add a podcast:")
+		fmt.Printf("  podgen --add <folder> --title \"My Podcast\"\n")
+		fmt.Println()
+		fmt.Printf("Or edit config: %s\n", configs.DefaultConfigFile())
+		return
+	}
+
 	app, store := setupApplication(conf)
 	defer func() { _ = store.Close() }()
 
@@ -215,7 +226,7 @@ func loadConfig(forMigration bool) *configs.Conf {
 		log.Fatalf("[ERROR] invalid config: %v", err)
 	}
 
-	if !proc.CheckFileExists(conf.Storage.Folder) {
+	if !proc.CheckFileExists(conf.GetStorageFolder()) {
 		log.Fatal("[ERROR] storage folder not found")
 	}
 
@@ -270,8 +281,8 @@ func setupApplication(conf *configs.Conf) (*podgen.App, storage.Store) {
 	procEntity := &proc.Processor{
 		Storage:     store,
 		S3Client:    &proc.S3Store{Client: s3client, Location: conf.CloudStorage.Region, Bucket: conf.CloudStorage.Bucket},
-		Files:       &proc.Files{Storage: conf.Storage.Folder},
-		StoragePath: conf.Storage.Folder,
+		Files:       &proc.Files{Storage: conf.GetStorageFolder()},
+		StoragePath: conf.GetStorageFolder(),
 		ChunkSize:   chunkSize,
 	}
 
@@ -372,13 +383,15 @@ func runAddPodcast() error {
 
 	podcastID := strings.ToLower(folderName)
 
-	// Load existing config
-	configFile := opts.Conf
-	if !proc.CheckFileExists(configFile) {
-		configFile = "configs/podgen.yml"
-	}
-	if !proc.CheckFileExists(configFile) {
-		return fmt.Errorf("config file not found: %s", opts.Conf)
+	// Load or create config
+	configFile := findConfigFile()
+	if configFile == "" {
+		// Create default config
+		if _, err := configs.CreateDefaultConfig(); err != nil {
+			return fmt.Errorf("failed to create config: %w", err)
+		}
+		configFile = configs.DefaultConfigFile()
+		fmt.Printf("Config created: %s\n", configFile)
 	}
 
 	conf, err := configs.Load(configFile)
@@ -392,7 +405,7 @@ func runAddPodcast() error {
 	}
 
 	// Check if folder exists in storage
-	storagePath := conf.Storage.Folder
+	storagePath := conf.GetStorageFolder()
 	if storagePath == "" {
 		storagePath = "storage"
 	}

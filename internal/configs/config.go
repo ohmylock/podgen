@@ -57,9 +57,9 @@ func CreateDefaultConfig() (bool, error) {
 # Add podcasts using: podgen --add <folder> --title "Podcast Title"
 podcasts: {}
 
-# Local storage folder for MP3 files
-storage:
-  folder: ""
+# Local storage folder for MP3 files (default: current directory)
+# storage:
+#   folder: /path/to/podcasts
 
 # S3-compatible cloud storage
 cloud_storage:
@@ -224,4 +224,13 @@ func (c *Conf) IsArtworkAutoGenerateEnabled() bool {
 		return true
 	}
 	return *c.Artwork.AutoGenerate
+}
+
+// GetStorageFolder returns the storage folder path.
+// Defaults to current directory if not configured.
+func (c *Conf) GetStorageFolder() string {
+	if c.Storage.Folder == "" {
+		return "."
+	}
+	return c.Storage.Folder
 }

@@ -23,28 +23,27 @@ func TestConf_Validate(t *testing.T) {
 		require.NoError(t, validConf().Validate())
 	})
 
-	t.Run("missing storage folder", func(t *testing.T) {
-		c := validConf()
-		c.Storage.Folder = ""
-		assert.ErrorContains(t, c.Validate(), "storage.folder")
+	t.Run("empty config is valid", func(t *testing.T) {
+		c := &Conf{}
+		require.NoError(t, c.Validate())
 	})
 
-	t.Run("missing endpoint url", func(t *testing.T) {
+	t.Run("missing endpoint url with podcasts", func(t *testing.T) {
 		c := validConf()
 		c.CloudStorage.EndPointURL = ""
 		assert.ErrorContains(t, c.Validate(), "endpoint_url")
 	})
 
-	t.Run("missing bucket", func(t *testing.T) {
+	t.Run("missing bucket with podcasts", func(t *testing.T) {
 		c := validConf()
 		c.CloudStorage.Bucket = ""
 		assert.ErrorContains(t, c.Validate(), "bucket")
 	})
 
-	t.Run("no podcasts", func(t *testing.T) {
+	t.Run("no podcasts is valid", func(t *testing.T) {
 		c := validConf()
 		c.Podcasts = nil
-		assert.ErrorContains(t, c.Validate(), "no podcasts")
+		require.NoError(t, c.Validate())
 	})
 
 	t.Run("podcast missing folder", func(t *testing.T) {
