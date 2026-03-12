@@ -292,8 +292,9 @@ func (s *Store) getEpisodeByFilenameInTx(tx *bolt.Tx, podcastID, fileName string
 	episode := &podcast.Episode{}
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
-		log.Printf("[WARN] no bucket for %s", podcastID)
-		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetEpisodeByFilename", Err: apperrors.ErrNoBucket}
+		// No bucket means no episodes exist yet for this podcast - return ErrNotFound
+		// to match SQLite behavior where missing rows return ErrNotFound
+		return nil, storage.ErrNotFound
 	}
 
 	item := bucket.Get(key)

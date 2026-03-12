@@ -81,11 +81,9 @@ func RunWorkerPool(ctx context.Context, workers int, tasks <-chan UploadTask, up
 						return
 					}
 					result := uploadFn(ctx, workerID, task)
-					select {
-					case results <- result:
-					case <-ctx.Done():
-						return
-					}
+					// Always send the result after upload completes to prevent S3/DB inconsistency.
+					// If upload succeeded, we must update DB even if context was canceled.
+					results <- result
 				}
 			}
 		}(workerID)

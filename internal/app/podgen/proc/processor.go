@@ -367,6 +367,11 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 			continue
 		}
 	}
+
+	// Include context error if canceled to signal incomplete work
+	if ctx.Err() != nil {
+		uploadErrs = append(uploadErrs, ctx.Err())
+	}
 	return errors.Join(uploadErrs...)
 }
 
