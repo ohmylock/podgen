@@ -187,7 +187,25 @@ podgen -g -p mypodcast --artwork-style=letter
 
 ## Конфигурация
 
-Конфиг хранится в `podgen.yml`:
+### Расположение файлов
+
+podgen ищет конфиг в следующем порядке:
+
+1. Флаг `--conf` или переменная окружения `PODGEN_CONF`
+2. `~/.config/podgen/config.yaml` (рекомендуется)
+3. `./podgen.yml` (текущая директория, для совместимости)
+4. `./configs/podgen.yml` (для совместимости)
+
+Рекомендуемое расположение — `~/.config/podgen/config.yaml`.
+
+### Расположение базы данных
+
+По умолчанию база данных хранится в `~/.config/podgen/podgen.db`. Можно переопределить:
+- `database.path` в конфиге
+- Флаг `-d` / `--db`
+- Переменная окружения `PODGEN_DB`
+
+### Формат конфига
 
 ```yaml
 podcasts:
@@ -229,8 +247,8 @@ cloud_storage:
 
 | Переменная | Описание |
 |------------|----------|
-| `PODGEN_CONF` | Путь к конфиг-файлу (по умолчанию: `podgen.yml`) |
-| `PODGEN_DB` | Путь к базе данных (переопределяет конфиг) |
+| `PODGEN_CONF` | Путь к конфиг-файлу (по умолчанию: `~/.config/podgen/config.yaml`) |
+| `PODGEN_DB` | Путь к базе данных (по умолчанию: `~/.config/podgen/podgen.db`) |
 
 ```bash
 PODGEN_CONF=/etc/podgen/config.yml PODGEN_DB=/var/lib/podgen/data.sqlite podgen -s -u -a
@@ -264,8 +282,8 @@ podgen --migrate-from=bolt:/path/to/podgen.bdb -d /path/to/podgen.sqlite
 
 ```
 Опции приложения:
-  -c, --conf=             конфиг-файл (yml). По умолчанию podgen.yml
-  -d, --db=               путь к базе данных (переопределяет конфиг)
+  -c, --conf=             путь к конфигу (по умолчанию: ~/.config/podgen/config.yaml)
+  -d, --db=               путь к базе данных (по умолчанию: ~/.config/podgen/podgen.db)
   -s, --scan              найти и добавить новые эпизоды
   -u, --upload            загрузить эпизоды
   -f, --feed              перегенерировать RSS-ленты

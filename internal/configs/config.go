@@ -9,6 +9,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DefaultConfigDir returns the default configuration directory path.
+// Returns ~/.config/podgen/ on all platforms.
+func DefaultConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".config", "podgen")
+	}
+	return filepath.Join(home, ".config", "podgen")
+}
+
+// DefaultConfigFile returns the default config file path.
+func DefaultConfigFile() string {
+	return filepath.Join(DefaultConfigDir(), "config.yaml")
+}
+
+// DefaultDatabasePath returns the default database file path.
+func DefaultDatabasePath() string {
+	return filepath.Join(DefaultConfigDir(), "podgen.db")
+}
+
+// EnsureConfigDir creates the config directory if it doesn't exist.
+func EnsureConfigDir() error {
+	return os.MkdirAll(DefaultConfigDir(), 0o700)
+}
+
 // StorageConfig defines database storage configuration
 type StorageConfig struct {
 	// Type specifies the storage backend: sqlite (default), bolt, or postgres
@@ -131,11 +156,8 @@ func (c *Conf) GetStorageDSN() string {
 	if c.DB != "" {
 		return c.DB
 	}
-	// Default: podgen.db in storage folder
-	if c.Storage.Folder != "" {
-		return filepath.Join(c.Storage.Folder, "podgen.db")
-	}
-	return "podgen.db"
+	// Default: ~/.config/podgen/podgen.db
+	return DefaultDatabasePath()
 }
 
 // IsArtworkAutoGenerateEnabled returns whether automatic artwork generation is enabled.

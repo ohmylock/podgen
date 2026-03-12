@@ -23,7 +23,7 @@ import (
 )
 
 var opts struct {
-	Conf              string `short:"c" long:"conf" env:"PODGEN_CONF" default:"podgen.yml" description:"config file (yml)"`
+	Conf              string `short:"c" long:"conf" env:"PODGEN_CONF" description:"config file (yml)"`
 	DB                string `short:"d" long:"db" env:"PODGEN_DB" description:"database file path (overrides config)"`
 	Upload            bool   `short:"u" long:"upload" description:"Upload episodes"`
 	Scan              bool   `short:"s" long:"scan" description:"Find and add new episodes"`
@@ -113,13 +113,45 @@ func parseFlags() bool {
 	return true
 }
 
-func loadConfig(forMigration bool) *configs.Conf {
-	configFile := opts.Conf
-	if !proc.CheckFileExists(configFile) {
-		configFile = "configs/podgen.yml"
+// findConfigFile searches for config file in order of priority:
+// 1. CLI flag --conf / env PODGEN_CONF
+// 2. ~/.config/podgen/config.yaml
+// 3. ./podgen.yml (backward compatibility)
+// 4. ./configs/podgen.yml (backward compatibility)
+// Returns empty string if no config file found.
+func findConfigFile() string {
+	// CLI flag or env var takes priority
+	if opts.Conf != "" {
+		if proc.CheckFileExists(opts.Conf) {
+			return opts.Conf
+		}
+		// If explicitly specified but not found, return it anyway
+		// so loadConfig can report the error
+		return opts.Conf
 	}
 
-	configExists := proc.CheckFileExists(configFile)
+	// Check ~/.config/podgen/config.yaml
+	defaultConfig := configs.DefaultConfigFile()
+	if proc.CheckFileExists(defaultConfig) {
+		return defaultConfig
+	}
+
+	// Backward compatibility: check current directory
+	if proc.CheckFileExists("podgen.yml") {
+		return "podgen.yml"
+	}
+
+	// Backward compatibility: check configs/ subdirectory
+	if proc.CheckFileExists("configs/podgen.yml") {
+		return "configs/podgen.yml"
+	}
+
+	return ""
+}
+
+func loadConfig(forMigration bool) *configs.Conf {
+	configFile := findConfigFile()
+	configExists := configFile != ""
 
 	// Migration with -d flag can run without config file or with malformed config
 	// The -d flag provides complete destination specification
@@ -137,12 +169,12 @@ func loadConfig(forMigration bool) *configs.Conf {
 	}
 
 	if !configExists {
-		log.Fatal("[ERROR] config file not found")
+		log.Fatalf("[ERROR] config file not found. Create config at %s or specify with --conf flag", configs.DefaultConfigFile())
 	}
 
 	conf, err := configs.Load(configFile)
 	if err != nil {
-		log.Fatalf("[ERROR] can't load config %s, %v", opts.Conf, err)
+		log.Fatalf("[ERROR] can't load config %s, %v", configFile, err)
 	}
 
 	// Migration mode only needs database config, not full app config
@@ -180,6 +212,13 @@ func setupApplication(conf *configs.Conf) (*podgen.App, storage.Store) {
 
 	if storageDSN == "" {
 		log.Fatal("[ERROR] database path not configured")
+	}
+
+	// Ensure parent directory exists for the database file
+	if dir := filepath.Dir(storageDSN); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			log.Fatalf("[ERROR] can't create database directory %s: %v", dir, err)
+		}
 	}
 
 	store, err := factory.NewFromStrings(storageType, storageDSN)

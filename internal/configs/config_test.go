@@ -245,16 +245,9 @@ func TestGetStorageDSN(t *testing.T) {
 			expected: "/legacy/podgen.bolt",
 		},
 		{
-			name: "storage folder default",
-			setup: func(c *Conf) {
-				c.Storage.Folder = "/data"
-			},
-			expected: "/data/podgen.db",
-		},
-		{
-			name: "absolute default",
+			name: "default to config dir",
 			setup: func(c *Conf) {},
-			expected: "podgen.db",
+			expected: DefaultDatabasePath(),
 		},
 	}
 

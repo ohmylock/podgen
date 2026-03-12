@@ -96,8 +96,8 @@ make build
 
 ```
 Application options:
-  -c, --conf=             config file (yml). Default podgen.yml
-  -d, --db=               database file path (overrides config)
+  -c, --conf=             config file path (default: ~/.config/podgen/config.yaml)
+  -d, --db=               database file path (default: ~/.config/podgen/podgen.db)
   -s, --scan              Find and add new episodes
   -u, --upload            Upload episodes
   -f, --feed              Regenerate feeds
@@ -122,7 +122,27 @@ Help Options:
 
 ## Configuration
 
-Usually, podgen configuration is stored in `podgen.yml` file. It is a yaml file with the following structure:
+### Config File Location
+
+podgen searches for config file in the following order:
+
+1. `--conf` flag or `PODGEN_CONF` environment variable
+2. `~/.config/podgen/config.yaml` (recommended)
+3. `./podgen.yml` (current directory, for backward compatibility)
+4. `./configs/podgen.yml` (for backward compatibility)
+
+The recommended location is `~/.config/podgen/config.yaml`. This keeps your configuration in a standard location and separates it from project files.
+
+### Database Location
+
+By default, the database is stored at `~/.config/podgen/podgen.db`. You can override this with:
+- `database.path` in config file
+- `-d` / `--db` flag
+- `PODGEN_DB` environment variable
+
+### Config File Format
+
+The config file is YAML with the following structure:
 
 ```yaml
 podcasts:
@@ -171,8 +191,8 @@ Configuration can be overridden via environment variables:
 
 | Variable | Description |
 |----------|-------------|
-| `PODGEN_CONF` | Path to config file (default: `podgen.yml`) |
-| `PODGEN_DB` | Database file path (overrides config) |
+| `PODGEN_CONF` | Path to config file (default: `~/.config/podgen/config.yaml`) |
+| `PODGEN_DB` | Database file path (default: `~/.config/podgen/podgen.db`) |
 
 Example:
 ```bash
