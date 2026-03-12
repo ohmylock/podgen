@@ -551,10 +551,17 @@ func SanitizeCDATA(s string) string {
 
 func (p *Processor) uploadSingleEpisode(ctx context.Context, podcastID, podcastFolder string, episodeItem *podcast.Episode, progress ProgressFunc) (UploadedEpisode, error) {
 	// Check if file already exists on S3 with same size
-	objectInfo, _ := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
+	objectInfo, err := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
+	if err != nil {
+		log.Printf("[DEBUG] GetObjectInfo for %s: %v", episodeItem.Filename, err)
+	}
 	var location string
 	if objectInfo != nil && episodeItem.Size == objectInfo.Size {
 		location = objectInfo.Location
+		// Report 100% progress for cached files
+		if progress != nil {
+			progress(episodeItem.Size, episodeItem.Size)
+		}
 	}
 
 	if location == "" {

@@ -75,7 +75,7 @@ func (c *Conf) Save(fileName string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(fileName, data, 0o644)
+	return os.WriteFile(fileName, data, 0o600)
 }
 
 // GetStorageType returns the configured storage type, defaulting to "sqlite"
