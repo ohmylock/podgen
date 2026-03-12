@@ -35,6 +35,7 @@ Application options:
       --title=            Title for new podcast (used with --add-podcast)
       --clear             Force delete old episodes before upload
   -g, --generate-artwork  Force (re)generate podcast artwork
+      --artwork-style=    Artwork style (solid, gradient, gradient-diagonal, radial, circles, blobs, noise, letter, aurora)
 
 Help Options:
   -h, --help              Show this help message
@@ -196,11 +197,42 @@ Progress display is automatically disabled when output is piped or redirected.
 When no podcast cover image (`podcast.png`) exists in a podcast folder, podgen can automatically generate one. The generated artwork:
 
 - Creates a 3000x3000 pixel PNG (meets Apple/Spotify requirements)
-- Uses a gradient background with colors derived from the podcast name
 - Centers the podcast title with readable text
 - Saves as `podcast.png` in the podcast folder
 
-Artwork generation is enabled by default. To disable:
+### Available Styles
+
+| Style | Description |
+|-------|-------------|
+| `aurora` | Mesh gradient with vibrant colors, northern lights style (default). Each podcast gets unique colors based on its name |
+| `letter` | Big first letter + soft gradient, muted pastel colors |
+| `solid` | Solid pastel color |
+| `gradient` | Vertical gradient, muted pastel |
+| `gradient-diagonal` | Diagonal gradient, muted pastel |
+| `radial` | Radial gradient (center lighter), muted pastel |
+| `circles` | Soft translucent circles on pastel background |
+| `blobs` | Organic blob shapes on pastel background |
+| `noise` | Gradient with subtle texture, muted pastel |
+
+### Usage
+
+```bash
+# Generate artwork when adding podcast (uses aurora by default)
+podgen --add mypodcast
+
+# Generate with specific style
+podgen --add mypodcast --artwork-style=letter
+
+# Force regenerate artwork (always overwrites existing)
+podgen -g -p mypodcast
+
+# Force regenerate with specific style
+podgen -g -p mypodcast --artwork-style=blobs
+```
+
+### Configuration
+
+Artwork generation is enabled by default. To disable auto-generation:
 
 ```yaml
 artwork:
@@ -209,11 +241,7 @@ artwork:
 
 If disabled and no image exists, the `-i` (image upload) flag will fail with an error.
 
-To force regenerate artwork (even if an image already exists):
-
-```bash
-podgen -g -p mypodcast
-```
+Note: `-g` flag always regenerates artwork regardless of `auto_generate` setting.
 
 ## Adding Podcasts
 

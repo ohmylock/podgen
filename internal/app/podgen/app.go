@@ -11,6 +11,7 @@ import (
 	log "github.com/go-pkgz/lgr"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"podgen/internal/app/podgen/artwork"
 	"podgen/internal/app/podgen/proc"
 	"podgen/internal/configs"
 )
@@ -146,12 +147,13 @@ func (a *App) GenerateFeed(ctx context.Context, podcastIDs string, podcastImages
 
 // UploadPodcastImage by podcast to s3 storage.
 // If forceRegenerate is true, artwork is regenerated even if an image already exists.
-func (a *App) UploadPodcastImage(ctx context.Context, podcastIDs string, forceRegenerate bool) map[string]string {
+// artworkStyle specifies the style for generated artwork.
+func (a *App) UploadPodcastImage(ctx context.Context, podcastIDs string, forceRegenerate bool, artworkStyle string) map[string]string {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	result := make(map[string]string, len(podcasts))
 	for i, p := range podcasts {
-		imageURL, err := a.processor.UploadPodcastImage(ctx, i, p.Folder, podcastDefaultImage, a.config.IsArtworkAutoGenerateEnabled(), forceRegenerate, p.Title)
+		imageURL, err := a.processor.UploadPodcastImage(ctx, i, p.Folder, podcastDefaultImage, a.config.IsArtworkAutoGenerateEnabled(), forceRegenerate, p.Title, artwork.Style(artworkStyle))
 		if err != nil {
 			log.Printf("[ERROR] can't upload podcast image %s, %v", podcastDefaultImage, err)
 			continue

@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"podgen/internal/app/podgen/artwork"
 	"podgen/internal/app/podgen/podcast"
 	"podgen/internal/app/podgen/proc"
 	"podgen/internal/app/podgen/proc/mocks"
@@ -1295,6 +1296,7 @@ func TestProcessor_UploadPodcastImage(t *testing.T) {
 				tt.autoGenerate,
 				false, // forceRegenerate
 				tt.podcastTitle,
+				artwork.StyleLetter,
 			)
 
 			if tt.wantErr {
@@ -1363,6 +1365,7 @@ func TestProcessor_UploadPodcastImage_GeneratedImageDeterministic(t *testing.T) 
 		true,
 		false, // forceRegenerate
 		podcastTitle,
+		artwork.StyleLetter,
 	)
 	require.NoError(t, err1)
 	assert.NotEmpty(t, location1)
@@ -1385,6 +1388,7 @@ func TestProcessor_UploadPodcastImage_GeneratedImageDeterministic(t *testing.T) 
 		true,
 		false, // forceRegenerate
 		podcastTitle,
+		artwork.StyleLetter,
 	)
 	require.NoError(t, err2)
 

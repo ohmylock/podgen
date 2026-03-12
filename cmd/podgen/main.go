@@ -40,6 +40,7 @@ var opts struct {
 	PodcastTitle      string `long:"title" description:"Title for new podcast (used with --add-podcast)"`
 	ForceDelete       bool   `long:"clear" description:"Force delete old episodes before upload (ignores delete_old_episodes setting)"`
 	GenerateArtwork   bool   `short:"g" long:"generate-artwork" description:"Force (re)generate podcast artwork"`
+	ArtworkStyle      string `long:"artwork-style" description:"Artwork style: solid, gradient, gradient-diagonal, radial, circles, blobs, noise, letter, aurora (default: aurora)"`
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
 }
 
@@ -351,8 +352,12 @@ func runAddPodcast() error {
 	// Generate artwork if no podcast image exists
 	podcastImagePath := filepath.Join(folderPath, "podcast.png")
 	if !proc.CheckFileExists(podcastImagePath) {
-		log.Printf("[INFO] Generating artwork for %s", podcastID)
-		if err := artwork.Generate(podcastID, title, podcastImagePath); err != nil {
+		style := artwork.Style(opts.ArtworkStyle)
+		if style == "" {
+			style = artwork.StyleAurora
+		}
+		log.Printf("[INFO] Generating artwork for %s (style: %s)", podcastID, style)
+		if err := artwork.GenerateWithStyle(podcastID, title, podcastImagePath, style); err != nil {
 			return fmt.Errorf("can't generate artwork: %w", err)
 		}
 		log.Printf("[INFO] Artwork generated at %s", podcastImagePath)
@@ -407,7 +412,7 @@ func runOperations(ctx context.Context, app *podgen.App, podcasts string) int {
 
 	var images map[string]string
 	if opts.UpdateImage || opts.GenerateArtwork {
-		images = app.UploadPodcastImage(ctx, podcasts, opts.GenerateArtwork)
+		images = app.UploadPodcastImage(ctx, podcasts, opts.GenerateArtwork, opts.ArtworkStyle)
 	}
 
 	if opts.Rollback {

@@ -249,32 +249,34 @@ func (p *Processor) RollbackEpisodesOfSession(ctx context.Context, podcastID, se
 // UploadPodcastImage to s3 storage.
 // If the image file is not found and autoGenerate is true, artwork is generated using podcastTitle as the label.
 // If forceRegenerate is true, artwork is always regenerated regardless of existing images.
-func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFolder, podcastImageFilename string, autoGenerate, forceRegenerate bool, podcastTitle string) (string, error) {
+// artworkStyle specifies the style for generated artwork (empty string uses default).
+func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFolder, podcastImageFilename string, autoGenerate, forceRegenerate bool, podcastTitle string, artworkStyle artwork.Style) (string, error) {
 	log.Printf("[INFO] Started upload podcast image %s - %s", podcastID, podcastImageFilename)
 
 	podcastImagePath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, podcastImageFilename)
 
-	// Force regenerate artwork if requested
+	// Force regenerate artwork — always generate, no file checks
 	if forceRegenerate {
-		log.Printf("[INFO] Force generating artwork for %s at %s", podcastID, podcastImagePath)
-		if err := artwork.Generate(podcastID, podcastTitle, podcastImagePath); err != nil {
+		log.Printf("[INFO] Force generating artwork for %s at %s (style: %s)", podcastID, podcastImagePath, artworkStyle)
+		if err := artwork.GenerateWithStyle(podcastID, podcastTitle, podcastImagePath, artworkStyle); err != nil {
 			return "", fmt.Errorf("artwork generation for %s: %w", podcastID, err)
 		}
-	}
-
-	if !CheckFileExists(podcastImagePath) {
-		podcastImagePath = fmt.Sprintf("%s/%s", p.StoragePath, podcastImageFilename)
-	}
-
-	if !CheckFileExists(podcastImagePath) {
-		if !autoGenerate {
-			return "", errors.New("podcast image not found")
+	} else {
+		// Normal flow: check if image exists, generate if needed
+		if !CheckFileExists(podcastImagePath) {
+			podcastImagePath = fmt.Sprintf("%s/%s", p.StoragePath, podcastImageFilename)
 		}
 
-		podcastImagePath = fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, podcastImageFilename)
-		log.Printf("[INFO] Generating artwork for %s at %s", podcastID, podcastImagePath)
-		if err := artwork.Generate(podcastID, podcastTitle, podcastImagePath); err != nil {
-			return "", fmt.Errorf("artwork generation for %s: %w", podcastID, err)
+		if !CheckFileExists(podcastImagePath) {
+			if !autoGenerate {
+				return "", errors.New("podcast image not found")
+			}
+
+			podcastImagePath = fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, podcastImageFilename)
+			log.Printf("[INFO] Generating artwork for %s at %s (style: %s)", podcastID, podcastImagePath, artworkStyle)
+			if err := artwork.GenerateWithStyle(podcastID, podcastTitle, podcastImagePath, artworkStyle); err != nil {
+				return "", fmt.Errorf("artwork generation for %s: %w", podcastID, err)
+			}
 		}
 	}
 
