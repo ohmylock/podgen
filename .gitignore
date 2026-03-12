@@ -47,9 +47,11 @@ podgen.yml
 progress*.txt
 
 # Internal development docs
+/docs/
 docs/plans/
 docs/reviews/
 docs/issues/
 
 # Ralphex
 .ralphex/
+
