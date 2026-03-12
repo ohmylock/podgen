@@ -12,7 +12,6 @@ import (
 	_ "modernc.org/sqlite"
 
 	"podgen/internal/app/podgen/podcast"
-	apperrors "podgen/internal/errors"
 	"podgen/internal/storage"
 )
 
@@ -180,18 +179,10 @@ func (s *Store) SaveEpisode(podcastID string, episode *podcast.Episode) error {
 }
 
 // FindEpisodesByStatus retrieves all episodes with the given status.
+// Returns an empty slice if the podcast has no episodes yet.
 func (s *Store) FindEpisodesByStatus(podcastID string, status podcast.Status) ([]*podcast.Episode, error) {
 	if s.db == nil {
 		return nil, storage.ErrClosed
-	}
-
-	// Check if podcast exists
-	exists, err := s.podcastExists(podcastID)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "FindEpisodesByStatus", Err: apperrors.ErrNoBucket}
 	}
 
 	query := `
@@ -211,18 +202,10 @@ func (s *Store) FindEpisodesByStatus(podcastID string, status podcast.Status) ([
 }
 
 // FindEpisodesBySession retrieves all episodes for a given session.
+// Returns an empty slice if the podcast has no episodes yet.
 func (s *Store) FindEpisodesBySession(podcastID, session string) ([]*podcast.Episode, error) {
 	if s.db == nil {
 		return nil, storage.ErrClosed
-	}
-
-	// Check if podcast exists
-	exists, err := s.podcastExists(podcastID)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "FindEpisodesBySession", Err: apperrors.ErrNoBucket}
 	}
 
 	query := `
@@ -251,11 +234,6 @@ func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status,
 	// First get episodes by status
 	episodes, err := s.FindEpisodesByStatus(podcastID, status)
 	if err != nil {
-		// Only swallow ErrNoBucket, propagate other errors
-		var epErr *apperrors.EpisodeError
-		if errors.As(err, &epErr) && errors.Is(epErr.Err, apperrors.ErrNoBucket) {
-			return nil, nil
-		}
 		return nil, err
 	}
 
@@ -295,18 +273,10 @@ func (s *Store) getUploadedSize(podcastID string) (int64, error) {
 }
 
 // GetEpisodeByFilename retrieves an episode by its filename.
+// Returns ErrNotFound if the episode doesn't exist (including when the podcast has no episodes yet).
 func (s *Store) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episode, error) {
 	if s.db == nil {
 		return nil, storage.ErrClosed
-	}
-
-	// Check if podcast exists
-	exists, err := s.podcastExists(podcastID)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetEpisodeByFilename", Err: apperrors.ErrNoBucket}
 	}
 
 	query := `
@@ -332,18 +302,10 @@ func (s *Store) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episo
 }
 
 // GetLastEpisodeByNotStatus retrieves the last episode that doesn't have the given status.
+// Returns nil if no matching episode exists.
 func (s *Store) GetLastEpisodeByNotStatus(podcastID string, status podcast.Status) (*podcast.Episode, error) {
 	if s.db == nil {
 		return nil, storage.ErrClosed
-	}
-
-	// Check if podcast exists
-	exists, err := s.podcastExists(podcastID)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "GetLastEpisodeByNotStatus", Err: apperrors.ErrNoBucket}
 	}
 
 	query := `
@@ -412,19 +374,6 @@ func (s *Store) ListEpisodes(podcastID string) ([]*podcast.Episode, error) {
 	defer rows.Close()
 
 	return s.scanEpisodes(rows)
-}
-
-// podcastExists checks if any episodes exist for the given podcast.
-func (s *Store) podcastExists(podcastID string) (bool, error) {
-	var exists int
-	err := s.db.QueryRow("SELECT 1 FROM episodes WHERE podcast_id = ? LIMIT 1", podcastID).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // scanEpisode scans a single episode from a row.

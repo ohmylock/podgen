@@ -252,9 +252,14 @@ func TestFindEpisodesByStatusNoBucket(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
 
-	_, err := store.FindEpisodesByStatus("nonexistent-podcast", podcast.New)
-	if err == nil {
-		t.Fatal("FindEpisodesByStatus() on nonexistent podcast should fail")
+	// For new podcasts (no episodes yet), should return empty slice, not error.
+	// This allows scanning new podcasts without requiring bucket creation first.
+	episodes, err := store.FindEpisodesByStatus("nonexistent-podcast", podcast.New)
+	if err != nil {
+		t.Fatalf("FindEpisodesByStatus() on nonexistent podcast should not fail: %v", err)
+	}
+	if len(episodes) != 0 {
+		t.Errorf("FindEpisodesByStatus() on nonexistent podcast should return empty slice, got %d", len(episodes))
 	}
 }
 
@@ -308,9 +313,13 @@ func TestFindEpisodesBySessionNoBucket(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
 
-	_, err := store.FindEpisodesBySession("nonexistent-podcast", "session1")
-	if err == nil {
-		t.Fatal("FindEpisodesBySession() on nonexistent podcast should fail")
+	// For new podcasts (no episodes yet), should return empty slice, not error.
+	episodes, err := store.FindEpisodesBySession("nonexistent-podcast", "session1")
+	if err != nil {
+		t.Fatalf("FindEpisodesBySession() on nonexistent podcast should not fail: %v", err)
+	}
+	if len(episodes) != 0 {
+		t.Errorf("FindEpisodesBySession() on nonexistent podcast should return empty slice, got %d", len(episodes))
 	}
 }
 
@@ -495,9 +504,13 @@ func TestGetLastEpisodeByNotStatusNoBucket(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
 
-	_, err := store.GetLastEpisodeByNotStatus("nonexistent-podcast", podcast.New)
-	if err == nil {
-		t.Fatal("GetLastEpisodeByNotStatus() on nonexistent podcast should fail")
+	// For new podcasts (no episodes yet), should return nil, not error.
+	episode, err := store.GetLastEpisodeByNotStatus("nonexistent-podcast", podcast.New)
+	if err != nil {
+		t.Fatalf("GetLastEpisodeByNotStatus() on nonexistent podcast should not fail: %v", err)
+	}
+	if episode != nil {
+		t.Errorf("GetLastEpisodeByNotStatus() on nonexistent podcast should return nil, got %v", episode)
 	}
 }
 

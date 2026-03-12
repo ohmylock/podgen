@@ -132,7 +132,7 @@ func (m *Multi) Reset(totalTasks int) {
 func (m *Multi) render() {
 	m.clearLines()
 
-	var lines []string
+	lines := make([]string, 0, 2+len(m.workers))
 
 	// Overall progress bar
 	pct := 0
@@ -151,11 +151,10 @@ func (m *Multi) render() {
 		statusParts = append(statusParts, fmt.Sprintf("%d errors", m.errors))
 	}
 
-	lines = append(lines, fmt.Sprintf("\033[1mTotal:\033[0m %s %3d%% │ %s",
-		bar, pct, strings.Join(statusParts, " │ ")))
-
-	// Separator
-	lines = append(lines, strings.Repeat("─", 80))
+	lines = append(lines,
+		fmt.Sprintf("\033[1mTotal:\033[0m %s %3d%% │ %s",
+			bar, pct, strings.Join(statusParts, " │ ")),
+		strings.Repeat("─", 80))
 
 	// Each worker
 	for i, w := range m.workers {
