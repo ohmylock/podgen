@@ -349,16 +349,22 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 		}
 		episode, err := p.Storage.GetEpisodeByFilename(podcastID, result.Episode.Filename)
 		if err != nil {
-			return fmt.Errorf("can't get episode by filename %s, %w", result.Episode.Filename, err)
+			log.Printf("[ERROR] can't get episode by filename %s, %v", result.Episode.Filename, err)
+			uploadErrs = append(uploadErrs, fmt.Errorf("get episode %s: %w", result.Episode.Filename, err))
+			continue
 		}
 		if episode == nil {
-			return fmt.Errorf("episode not found after upload: %s", result.Episode.Filename)
+			log.Printf("[ERROR] episode not found after upload: %s", result.Episode.Filename)
+			uploadErrs = append(uploadErrs, fmt.Errorf("episode not found after upload: %s", result.Episode.Filename))
+			continue
 		}
 		episode.Session = session
 		episode.Status = podcast.Uploaded
 		episode.Location = result.Location
 		if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
-			return fmt.Errorf("can't save episode %s, %w", episode.Filename, err)
+			log.Printf("[ERROR] can't save episode %s, %v", episode.Filename, err)
+			uploadErrs = append(uploadErrs, fmt.Errorf("save episode %s: %w", episode.Filename, err))
+			continue
 		}
 	}
 	return errors.Join(uploadErrs...)
