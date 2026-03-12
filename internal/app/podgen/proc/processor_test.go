@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1192,4 +1194,201 @@ func TestProcessor_GetFeedURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProcessor_UploadPodcastImage(t *testing.T) {
+	tests := []struct {
+		name          string
+		podcastID     string
+		podcastFolder string
+		imageFile     string
+		autoGenerate  bool
+		podcastTitle  string
+		imageExists   bool
+		uploadErr     error
+		wantErr       bool
+		wantErrMsg    string
+	}{
+		{
+			name:          "existing image is uploaded",
+			podcastID:     "pod1",
+			podcastFolder: "folder1",
+			imageFile:     "podcast.png",
+			autoGenerate:  true,
+			podcastTitle:  "My Podcast",
+			imageExists:   true,
+			wantErr:       false,
+		},
+		{
+			name:          "image not found and autoGenerate false returns error",
+			podcastID:     "pod1",
+			podcastFolder: "folder1",
+			imageFile:     "podcast.png",
+			autoGenerate:  false,
+			podcastTitle:  "My Podcast",
+			imageExists:   false,
+			wantErr:       true,
+			wantErrMsg:    "podcast image not found",
+		},
+		{
+			name:          "image not found and autoGenerate true generates and uploads",
+			podcastID:     "pod1",
+			podcastFolder: "folder1",
+			imageFile:     "podcast.png",
+			autoGenerate:  true,
+			podcastTitle:  "My Podcast",
+			imageExists:   false,
+			wantErr:       false,
+		},
+		{
+			name:          "upload error is propagated",
+			podcastID:     "pod1",
+			podcastFolder: "folder1",
+			imageFile:     "podcast.png",
+			autoGenerate:  true,
+			podcastTitle:  "My Podcast",
+			imageExists:   true,
+			uploadErr:     errors.New("s3 upload failed"),
+			wantErr:       true,
+			wantErrMsg:    "can't upload image",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			// Ensure podcast folder exists for generated images
+			podcastDir := filepath.Join(dir, tt.podcastFolder)
+			err := os.MkdirAll(podcastDir, 0o755)
+			require.NoError(t, err)
+
+			// Create image file if it should exist
+			var imagePath string
+			if tt.imageExists {
+				imagePath = filepath.Join(podcastDir, tt.imageFile)
+				err := os.WriteFile(imagePath, []byte("fake image data"), 0o644)
+				require.NoError(t, err)
+			}
+
+			s3 := &mocks.ObjectStorageMock{
+				UploadImageFunc: func(ctx context.Context, objectName string, filePath string) (*proc.UploadResult, error) {
+					if tt.uploadErr != nil {
+						return nil, tt.uploadErr
+					}
+					return &proc.UploadResult{
+						Location: fmt.Sprintf("https://s3/bucket/%s", objectName),
+					}, nil
+				},
+			}
+
+			p := &proc.Processor{
+				S3Client:    s3,
+				StoragePath: dir,
+			}
+
+			location, err := p.UploadPodcastImage(
+				context.Background(),
+				tt.podcastID,
+				tt.podcastFolder,
+				tt.imageFile,
+				tt.autoGenerate,
+				tt.podcastTitle,
+			)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantErrMsg != "" {
+					assert.Contains(t, err.Error(), tt.wantErrMsg)
+				}
+				return
+			}
+
+			require.NoError(t, err)
+			assert.NotEmpty(t, location)
+			assert.Contains(t, location, "https://s3/bucket/")
+
+			// If image was generated, verify it was created
+			if !tt.imageExists && tt.autoGenerate {
+				generatedPath := filepath.Join(dir, tt.podcastFolder, "podcast.generated.png")
+				_, statErr := os.Stat(generatedPath)
+				require.NoError(t, statErr, "generated image should exist")
+
+				// Verify generated image has correct dimensions (3000x3000)
+				file, openErr := os.Open(generatedPath)
+				require.NoError(t, openErr)
+				defer file.Close()
+
+				cfg, _, decodeErr := image.DecodeConfig(file)
+				require.NoError(t, decodeErr)
+				assert.Equal(t, 3000, cfg.Width, "generated image width should be 3000")
+				assert.Equal(t, 3000, cfg.Height, "generated image height should be 3000")
+			}
+		})
+	}
+}
+
+func TestProcessor_UploadPodcastImage_GeneratedImageDeterministic(t *testing.T) {
+	// Test that same podcast ID generates same image
+	dir := t.TempDir()
+	podcastID := "test-podcast"
+	podcastTitle := "Test Podcast"
+	podcastFolder := "folder1"
+
+	// Ensure podcast folder exists
+	podcastDir := filepath.Join(dir, podcastFolder)
+	mkdirErr := os.MkdirAll(podcastDir, 0o755)
+	require.NoError(t, mkdirErr)
+
+	s3 := &mocks.ObjectStorageMock{
+		UploadImageFunc: func(ctx context.Context, objectName string, filePath string) (*proc.UploadResult, error) {
+			return &proc.UploadResult{
+				Location: fmt.Sprintf("https://s3/bucket/%s", objectName),
+			}, nil
+		},
+	}
+
+	p := &proc.Processor{
+		S3Client:    s3,
+		StoragePath: dir,
+	}
+
+	// Generate image first time
+	location1, err1 := p.UploadPodcastImage(
+		context.Background(),
+		podcastID,
+		podcastFolder,
+		"podcast.png",
+		true,
+		podcastTitle,
+	)
+	require.NoError(t, err1)
+	assert.NotEmpty(t, location1)
+
+	// Read generated image
+	generatedPath1 := filepath.Join(dir, podcastFolder, "podcast.generated.png")
+	data1, readErr1 := os.ReadFile(generatedPath1)
+	require.NoError(t, readErr1)
+
+	// Remove the generated image to test idempotency
+	err := os.Remove(generatedPath1)
+	require.NoError(t, err)
+
+	// Generate again with same seed (podcastID)
+	_, err2 := p.UploadPodcastImage(
+		context.Background(),
+		podcastID,
+		podcastFolder,
+		"podcast.png",
+		true,
+		podcastTitle,
+	)
+	require.NoError(t, err2)
+
+	// Read newly generated image
+	data2, readErr2 := os.ReadFile(generatedPath1)
+	require.NoError(t, readErr2)
+
+	// Verify both images are identical (same seed produces same output)
+	assert.Equal(t, data1, data2, "same podcast ID should generate identical image")
 }
