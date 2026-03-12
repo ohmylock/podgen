@@ -17,7 +17,7 @@
 !/var/.gitkeep
 
 dist/
-/docs/plans/
+/docs/plans/*
 /podgen
 /.claude/
 # ralphex progress logs

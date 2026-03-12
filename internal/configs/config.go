@@ -18,6 +18,13 @@ type StorageConfig struct {
 	DSN string `yaml:"dsn"`
 }
 
+// ArtworkConfig defines artwork auto-generation configuration
+type ArtworkConfig struct {
+	// AutoGenerate enables automatic podcast cover art generation when no artwork exists.
+	// Nil/omitted defaults to true, explicit false disables it.
+	AutoGenerate *bool `yaml:"auto_generate"`
+}
+
 // Conf for config yaml
 type Conf struct {
 	Podcasts     map[string]Podcast `yaml:"podcasts"`
@@ -38,6 +45,7 @@ type Conf struct {
 		Folder string `yaml:"folder"`
 	} `yaml:"storage"`
 	Database StorageConfig `yaml:"database"`
+	Artwork  ArtworkConfig `yaml:"artwork"`
 }
 
 // Podcast defines podcast section
@@ -130,4 +138,13 @@ func (c *Conf) GetStorageDSN() string {
 		return filepath.Join(c.Storage.Folder, "podgen.db")
 	}
 	return "podgen.db"
+}
+
+// IsArtworkAutoGenerateEnabled returns whether automatic artwork generation is enabled.
+// Defaults to true if not explicitly configured.
+func (c *Conf) IsArtworkAutoGenerateEnabled() bool {
+	if c.Artwork.AutoGenerate == nil {
+		return true
+	}
+	return *c.Artwork.AutoGenerate
 }
