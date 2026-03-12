@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	log "github.com/go-pkgz/lgr"
+	"podgen/internal/app/podgen/artwork"
 	"podgen/internal/app/podgen/podcast"
 	"podgen/internal/configs"
 	"podgen/internal/storage"
@@ -246,8 +247,11 @@ func (p *Processor) RollbackEpisodesOfSession(ctx context.Context, podcastID, se
 	return nil
 }
 
-// UploadPodcastImage to s3 storage
-func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFolder, podcastImageFilename string) (string, error) {
+const generatedImageFilename = "podcast.generated.png"
+
+// UploadPodcastImage to s3 storage.
+// If the image file is not found and autoGenerate is true, artwork is generated using podcastTitle as the label.
+func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFolder, podcastImageFilename string, autoGenerate bool, podcastTitle string) (string, error) {
 	log.Printf("[INFO] Started upload podcast image %s - %s", podcastID, podcastImageFilename)
 
 	podcastImagePath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, podcastImageFilename)
@@ -256,7 +260,17 @@ func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFo
 	}
 
 	if !CheckFileExists(podcastImagePath) {
-		return "", errors.New("podcast image not found")
+		if !autoGenerate {
+			return "", errors.New("podcast image not found")
+		}
+
+		generatedPath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, generatedImageFilename)
+		log.Printf("[INFO] Generating artwork for %s at %s", podcastID, generatedPath)
+		if err := artwork.Generate(podcastID, podcastTitle, generatedPath); err != nil {
+			return "", fmt.Errorf("artwork generation for %s: %w", podcastID, err)
+		}
+		podcastImagePath = generatedPath
+		podcastImageFilename = generatedImageFilename
 	}
 
 	uploadInfo, err := p.S3Client.UploadImage(ctx,

@@ -150,7 +150,7 @@ func (a *App) UploadPodcastImage(ctx context.Context, podcastIDs string) map[str
 
 	result := make(map[string]string, len(podcasts))
 	for i, p := range podcasts {
-		imageURL, err := a.processor.UploadPodcastImage(ctx, i, p.Folder, podcastDefaultImage)
+		imageURL, err := a.processor.UploadPodcastImage(ctx, i, p.Folder, podcastDefaultImage, a.config.IsArtworkAutoGenerateEnabled(), p.Title)
 		if err != nil {
 			log.Printf("[ERROR] can't upload podcast image %s, %v", podcastDefaultImage, err)
 			continue
