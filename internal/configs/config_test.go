@@ -193,6 +193,27 @@ func TestHasStorageTypePreference(t *testing.T) {
 	}
 }
 
+func TestIsArtworkAutoGenerateEnabled(t *testing.T) {
+	t.Run("nil defaults to true", func(t *testing.T) {
+		c := &Conf{}
+		assert.True(t, c.IsArtworkAutoGenerateEnabled())
+	})
+
+	t.Run("explicit true", func(t *testing.T) {
+		c := &Conf{}
+		v := true
+		c.Artwork.AutoGenerate = &v
+		assert.True(t, c.IsArtworkAutoGenerateEnabled())
+	})
+
+	t.Run("explicit false", func(t *testing.T) {
+		c := &Conf{}
+		v := false
+		c.Artwork.AutoGenerate = &v
+		assert.False(t, c.IsArtworkAutoGenerateEnabled())
+	})
+}
+
 func TestGetStorageDSN(t *testing.T) {
 	tests := []struct {
 		name          string

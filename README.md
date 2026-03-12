@@ -188,7 +188,7 @@ Progress display is automatically disabled when output is piped or redirected.
 
 ## Automatic Artwork Generation
 
-When no podcast cover image (`podcast.png`, `podcast.jpg`) exists in a podcast folder, podgen can automatically generate one. The generated artwork:
+When no podcast cover image (`podcast.png`) exists in a podcast folder, podgen can automatically generate one. The generated artwork:
 
 - Creates a 3000x3000 pixel PNG (meets Apple/Spotify requirements)
 - Uses a gradient background with colors derived from the podcast name

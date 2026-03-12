@@ -49,16 +49,21 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 		}
 
 		pubDate := time.Now()
+		yearParsed := false
 
-		// Use ID3 Year tag if available, otherwise fall back to filename date regex.
+		// Use ID3 Year tag if available
 		if meta.Year != "" {
 			parsed, parseErr := time.Parse("2006", meta.Year)
 			if parseErr == nil {
 				pubDate = parsed
+				yearParsed = true
 			} else {
 				log.Printf("[WARN] could not parse ID3 Year %q from %s: %v", meta.Year, entity.Name(), parseErr)
 			}
-		} else {
+		}
+
+		// Fall back to filename date regex if Year tag unavailable or unparseable
+		if !yearParsed {
 			matches := re.FindAllString(entity.Name(), -1)
 			if matches != nil {
 				match := matches[0]
