@@ -65,7 +65,7 @@ func (s *Store) Open() error {
 
 	// Verify connection
 	if err = db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to ping sqlite database: %w", err)
 	}
 
@@ -78,7 +78,7 @@ func (s *Store) Open() error {
 	}
 	for _, pragma := range pragmas {
 		if _, err = db.Exec(pragma); err != nil {
-			db.Close()
+			_ = db.Close()
 			return fmt.Errorf("failed to execute %s: %w", pragma, err)
 		}
 	}
@@ -87,7 +87,7 @@ func (s *Store) Open() error {
 
 	// Create schema
 	if err = s.createSchema(); err != nil {
-		s.db.Close()
+		_ = s.db.Close()
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
 
@@ -196,7 +196,7 @@ func (s *Store) FindEpisodesByStatus(podcastID string, status podcast.Status) ([
 	if err != nil {
 		return nil, fmt.Errorf("failed to query episodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return s.scanEpisodes(rows)
 }
@@ -219,7 +219,7 @@ func (s *Store) FindEpisodesBySession(podcastID, session string) ([]*podcast.Epi
 	if err != nil {
 		return nil, fmt.Errorf("failed to query episodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return s.scanEpisodes(rows)
 }
@@ -340,7 +340,7 @@ func (s *Store) ListPodcasts() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list podcasts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var podcasts []string
 	for rows.Next() {
@@ -371,7 +371,7 @@ func (s *Store) ListEpisodes(podcastID string) ([]*podcast.Episode, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query episodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return s.scanEpisodes(rows)
 }

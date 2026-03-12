@@ -32,9 +32,9 @@ func TestGenerate_CorrectDimensions(t *testing.T) {
 	err := Generate("test-seed", "Test Podcast", out)
 	require.NoError(t, err)
 
-	f, err := os.Open(out)
+	f, err := os.Open(out) //nolint:gosec // test file path from t.TempDir()
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	cfg, _, err := image.DecodeConfig(f)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestGenerate_DifferentSeeds(t *testing.T) {
 // fileHash returns the hex SHA-256 of a file's contents.
 func fileHash(t *testing.T, path string) string {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // test file path from t.TempDir()
 	require.NoError(t, err)
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }

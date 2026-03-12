@@ -29,7 +29,7 @@ func newTestStore(t *testing.T) (*sqlite.Store, func()) { //nolint:gocritic // n
 	}
 
 	cleanup := func() {
-		store.Close()
+		_ = store.Close()
 	}
 
 	return store, cleanup
@@ -91,7 +91,7 @@ func TestOpenInvalidPath(t *testing.T) {
 	store := sqlite.New(cfg)
 	err := store.Open()
 	if err == nil {
-		store.Close()
+		_ = store.Close()
 		t.Fatal("Open() with invalid path should fail")
 	}
 }
@@ -689,7 +689,7 @@ func TestWALModeEnabled(t *testing.T) {
 	if err := store.Open(); err != nil {
 		t.Fatalf("Open() failed: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Write something to trigger WAL file creation
 	if err := store.SaveEpisode("test", &podcast.Episode{Filename: "test.mp3"}); err != nil {

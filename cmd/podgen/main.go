@@ -81,7 +81,7 @@ func main() {
 	conf := loadConfig(false)
 
 	app, store := setupApplication(conf)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	podcasts := resolvePodcasts(app)
 
@@ -244,7 +244,7 @@ func runMigration(conf *configs.Conf) error {
 	if err := srcStore.Open(); err != nil {
 		return fmt.Errorf("failed to open source store: %w", err)
 	}
-	defer srcStore.Close()
+	defer func() { _ = srcStore.Close() }()
 
 	// Create destination store from config
 	// When -d flag is provided for migration, always infer type from CLI path
@@ -253,11 +253,9 @@ func runMigration(conf *configs.Conf) error {
 	dstPath := conf.GetStorageDSN()
 	if opts.DB != "" {
 		dstPath = opts.DB
-		// For migration with explicit -d, infer type from destination path
-		// unless config has explicit database.type set (not just legacy db:)
-		if conf.Database.Type == "" {
-			dstType = configs.InferStorageTypeFromPath(opts.DB)
-		}
+		// For migration with explicit -d, always infer type from destination path
+		// CLI flag takes precedence over config
+		dstType = configs.InferStorageTypeFromPath(opts.DB)
 	}
 
 	dstStore, err := factory.NewFromStrings(dstType, dstPath)
@@ -267,7 +265,7 @@ func runMigration(conf *configs.Conf) error {
 	if err := dstStore.Open(); err != nil {
 		return fmt.Errorf("failed to open destination store: %w", err)
 	}
-	defer dstStore.Close()
+	defer func() { _ = dstStore.Close() }()
 
 	log.Printf("[INFO] Migrating from %s (%s) to %s (%s)", srcType, srcPath, dstType, dstPath)
 
@@ -286,6 +284,21 @@ func runMigration(conf *configs.Conf) error {
 // runAddPodcast adds a new podcast entry to the config file.
 func runAddPodcast() error {
 	folderName := opts.AddPodcast
+
+	// Validate folder name to prevent path traversal attacks
+	// Must be a simple directory name: no separators, not absolute, not "." or ".."
+	if folderName == "" || folderName == "." || folderName == ".." {
+		return fmt.Errorf("invalid folder name %q: cannot be empty or special directory", folderName)
+	}
+	if filepath.IsAbs(folderName) || strings.ContainsAny(folderName, `/\`) {
+		return fmt.Errorf("invalid folder name %q: must be a simple directory name without path separators", folderName)
+	}
+	// After cleaning, verify it's still a simple name (no internal traversal)
+	cleanName := filepath.Clean(folderName)
+	if cleanName != folderName || cleanName == "." || cleanName == ".." {
+		return fmt.Errorf("invalid folder name %q: contains invalid path components", folderName)
+	}
+
 	podcastID := strings.ToLower(folderName)
 
 	// Load existing config

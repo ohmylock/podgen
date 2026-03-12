@@ -28,7 +28,7 @@ func ReadMetadata(filePath string) (Metadata, error) {
 	if err != nil {
 		return Metadata{}, err
 	}
-	defer tag.Close()
+	defer func() { _ = tag.Close() }()
 
 	m := Metadata{
 		Title:  tag.Title(),
@@ -56,11 +56,11 @@ func ReadMetadata(filePath string) (Metadata, error) {
 // readDuration reads MP3 file and returns duration in iTunes format (HH:MM:SS or MM:SS).
 // Returns empty string if duration cannot be determined.
 func readDuration(filePath string) string {
-	f, err := os.Open(filePath)
+	f, err := os.Open(filePath) //nolint:gosec // filePath comes from internal code, not user input
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	d := mp3.NewDecoder(f)
 	var totalDuration time.Duration

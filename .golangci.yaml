@@ -15,9 +15,8 @@ linters:
     - nakedret
     - prealloc
     - staticcheck
-  disable:
-    - errcheck
     - gosec
+  disable:
     - revive
   settings:
     govet:

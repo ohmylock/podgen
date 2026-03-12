@@ -32,7 +32,7 @@ func TestNew_SQLite(t *testing.T) {
 	if err := store.Open(); err != nil {
 		t.Fatalf("Open() failed: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Verify SQLite WAL mode created the file
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -61,7 +61,7 @@ func TestNew_Bolt(t *testing.T) {
 	if err := store.Open(); err != nil {
 		t.Fatalf("Open() failed: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Verify BoltDB created the file
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -163,7 +163,7 @@ func TestNewFromStrings(t *testing.T) {
 			if err := store.Open(); err != nil {
 				t.Fatalf("Open() failed: %v", err)
 			}
-			store.Close()
+			_ = store.Close()
 		})
 	}
 }
@@ -245,7 +245,7 @@ func TestFactoryCreatesWorkingStores(t *testing.T) {
 			if err := store.Open(); err != nil {
 				t.Fatalf("Open() failed: %v", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			// Test basic operations work without error
 			podcasts, err := store.ListPodcasts()

@@ -59,8 +59,7 @@ func (p *Processor) Update(ctx context.Context, folderName, podcastID string) (i
 		}
 		item, err := p.Storage.GetEpisodeByFilename(podcastID, episode.Filename)
 		if err != nil && !errors.Is(err, storage.ErrNotFound) {
-			log.Printf("[ERROR] get episode by filename error, %v", err)
-			continue
+			return 0, fmt.Errorf("failed to check episode %s: %w", episode.Filename, err)
 		}
 
 		if item != nil {

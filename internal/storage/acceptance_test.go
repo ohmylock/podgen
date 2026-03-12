@@ -90,7 +90,7 @@ func TestAcceptance_SQLiteCreationAndPersistence(t *testing.T) {
 	if err := store2.Open(); err != nil {
 		t.Fatalf("Failed to reopen SQLite store: %v", err)
 	}
-	defer store2.Close()
+	defer func() { _ = store2.Close() }()
 
 	// Verify persisted data
 	retrieved2, err := store2.ListEpisodes("podcast1")
@@ -182,8 +182,8 @@ func TestAcceptance_BoltToSQLiteMigration(t *testing.T) {
 	}
 
 	// Close stores
-	boltStore.Close()
-	sqliteStore.Close()
+	_ = boltStore.Close()
+	_ = sqliteStore.Close()
 
 	// Verify migration stats
 	if stats.PodcastsProcessed != 2 {
@@ -204,7 +204,7 @@ func TestAcceptance_BoltToSQLiteMigration(t *testing.T) {
 	if err := sqliteStore2.Open(); err != nil {
 		t.Fatalf("Failed to reopen SQLite store: %v", err)
 	}
-	defer sqliteStore2.Close()
+	defer func() { _ = sqliteStore2.Close() }()
 
 	migratedEpisodes, err := sqliteStore2.ListEpisodes("migrated-podcast")
 	if err != nil {
@@ -286,7 +286,7 @@ func TestAcceptance_SQLiteWALMode(t *testing.T) {
 	if err := store2.Open(); err != nil {
 		t.Fatalf("Failed to reopen SQLite store: %v", err)
 	}
-	defer store2.Close()
+	defer func() { _ = store2.Close() }()
 
 	// Perform multiple reads (WAL allows concurrent reads)
 	for i := 0; i < 10; i++ {
@@ -326,7 +326,7 @@ func TestAcceptance_StorageFactory(t *testing.T) {
 			if err := store.Open(); err != nil {
 				t.Fatalf("Failed to open store: %v", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			// Verify store works
 			ep := &podcast.Episode{

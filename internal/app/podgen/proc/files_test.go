@@ -15,9 +15,9 @@ import (
 func writeTaggedMP3(t *testing.T, path, title, artist, album, year, comment string) {
 	t.Helper()
 
-	f, err := os.Create(path)
+	f, err := os.Create(path) //nolint:gosec // test helper creating file in t.TempDir()
 	require.NoError(t, err)
-	f.Close()
+	_ = f.Close()
 
 	tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
 	require.NoError(t, err)
@@ -37,13 +37,13 @@ func writeTaggedMP3(t *testing.T, path, title, artist, album, year, comment stri
 	}
 
 	require.NoError(t, tag.Save())
-	tag.Close()
+	_ = tag.Close()
 }
 
 func TestFindEpisodes_MetadataPopulated(t *testing.T) {
 	storage := t.TempDir()
 	podcast1 := filepath.Join(storage, "mypodcast")
-	require.NoError(t, os.MkdirAll(podcast1, 0o755))
+	require.NoError(t, os.MkdirAll(podcast1, 0o750))
 
 	mp3Path := filepath.Join(podcast1, "episode-one.mp3")
 	writeTaggedMP3(t, mp3Path, "Episode One", "Host Name", "Season 1", "2023", "Great episode")
@@ -71,7 +71,7 @@ func TestFindEpisodes_MetadataPopulated(t *testing.T) {
 func TestFindEpisodes_ID3YearUsedForPubDate(t *testing.T) {
 	storage := t.TempDir()
 	podcast1 := filepath.Join(storage, "mypodcast")
-	require.NoError(t, os.MkdirAll(podcast1, 0o755))
+	require.NoError(t, os.MkdirAll(podcast1, 0o750))
 
 	// Filename has no date; ID3 Year should be used.
 	mp3Path := filepath.Join(podcast1, "no-date-in-name.mp3")
@@ -95,7 +95,7 @@ func TestFindEpisodes_ID3YearUsedForPubDate(t *testing.T) {
 func TestFindEpisodes_FilenameDateFallback(t *testing.T) {
 	storage := t.TempDir()
 	podcast1 := filepath.Join(storage, "mypodcast")
-	require.NoError(t, os.MkdirAll(podcast1, 0o755))
+	require.NoError(t, os.MkdirAll(podcast1, 0o750))
 
 	// No ID3 Year; filename has date.
 	mp3Path := filepath.Join(podcast1, "2022-05-10-episode.mp3")
@@ -120,9 +120,9 @@ func TestFindEpisodes_FilenameDateFallback(t *testing.T) {
 func TestFindEpisodes_SkipsNonMP3(t *testing.T) {
 	storage := t.TempDir()
 	podcast1 := filepath.Join(storage, "mypodcast")
-	require.NoError(t, os.MkdirAll(podcast1, 0o755))
+	require.NoError(t, os.MkdirAll(podcast1, 0o750))
 
-	require.NoError(t, os.WriteFile(filepath.Join(podcast1, "readme.txt"), []byte("hi"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(podcast1, "readme.txt"), []byte("hi"), 0o600))
 	mp3Path := filepath.Join(podcast1, "valid.mp3")
 	writeTaggedMP3(t, mp3Path, "Valid", "", "", "2020", "")
 
@@ -142,7 +142,7 @@ func TestFindEpisodes_SkipsNonMP3(t *testing.T) {
 func TestFindEpisodes_EmptyFolder(t *testing.T) {
 	storage := t.TempDir()
 	podcast1 := filepath.Join(storage, "empty")
-	require.NoError(t, os.MkdirAll(podcast1, 0o755))
+	require.NoError(t, os.MkdirAll(podcast1, 0o750))
 
 	f := &Files{Storage: storage}
 	episodes, err := f.FindEpisodes("empty")

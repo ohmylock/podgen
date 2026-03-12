@@ -285,7 +285,7 @@ func TestStorageTypes(t *testing.T) {
 func TestFindEpisodesBySizeLimit(t *testing.T) {
 	store := NewMockStore()
 	_ = store.Open()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	podcastID := "test-podcast"
 
@@ -331,7 +331,7 @@ func TestFindEpisodesBySizeLimit(t *testing.T) {
 func TestGetLastEpisodeByNotStatus(t *testing.T) {
 	store := NewMockStore()
 	_ = store.Open()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	podcastID := "test-podcast"
 
@@ -364,7 +364,7 @@ func TestGetLastEpisodeByNotStatus(t *testing.T) {
 func TestNoBucketErrors(t *testing.T) {
 	store := NewMockStore()
 	_ = store.Open()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Test operations on non-existent podcast
 	_, err := store.FindEpisodesByStatus("nonexistent", podcast.New)

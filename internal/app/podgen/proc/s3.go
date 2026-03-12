@@ -112,11 +112,11 @@ func (s *S3Store) uploadFile(ctx context.Context, objectName, filePath string, p
 
 	if progress != nil {
 		// Use PutObject with progress tracking
-		file, err := os.Open(filePath)
+		file, err := os.Open(filePath) //nolint:gosec // filePath comes from internal code, not user input
 		if err != nil {
 			return nil, fmt.Errorf("can't open file %s: %w", filePath, err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		stat, err := file.Stat()
 		if err != nil {

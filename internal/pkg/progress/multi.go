@@ -164,7 +164,7 @@ func (m *Multi) render() {
 
 	// Write all lines
 	for _, line := range lines {
-		fmt.Fprintln(m.out, line)
+		_, _ = fmt.Fprintln(m.out, line)
 	}
 	m.linesWritten = len(lines)
 	m.lastRender = time.Now()
@@ -173,7 +173,7 @@ func (m *Multi) render() {
 // clearLines moves cursor up and clears previous output.
 func (m *Multi) clearLines() {
 	for i := 0; i < m.linesWritten; i++ {
-		fmt.Fprint(m.out, "\033[A\033[2K") // move up, clear line
+		_, _ = fmt.Fprint(m.out, "\033[A\033[2K") // move up, clear line
 	}
 }
 

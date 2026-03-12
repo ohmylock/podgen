@@ -29,7 +29,7 @@ func newTestStore(t *testing.T) (*boltstore.Store, func()) { //nolint:gocritic /
 	}
 
 	cleanup := func() {
-		store.Close()
+		_ = store.Close()
 	}
 
 	return store, cleanup
@@ -83,7 +83,7 @@ func TestOpenEmptyPath(t *testing.T) {
 	store := boltstore.New(cfg)
 	err := store.Open()
 	if err == nil {
-		store.Close()
+		_ = store.Close()
 		t.Fatal("Open() with empty path should fail")
 	}
 }

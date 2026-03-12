@@ -14,12 +14,12 @@ func newTestDB(t *testing.T) *BoltDB {
 	t.Helper()
 	f, err := os.CreateTemp("", "podgen-test-*.db")
 	require.NoError(t, err)
-	f.Close()
-	t.Cleanup(func() { os.Remove(f.Name()) })
+	_ = f.Close()
+	t.Cleanup(func() { _ = os.Remove(f.Name()) })
 
 	db, err := bolt.Open(f.Name(), 0o600, nil)
 	require.NoError(t, err)
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	return &BoltDB{DB: db}
 }

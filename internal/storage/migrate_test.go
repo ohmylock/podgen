@@ -29,7 +29,7 @@ func newBoltStore(t *testing.T) (storage.Store, func()) { //nolint:gocritic // n
 		t.Fatalf("failed to open bolt store: %v", err)
 	}
 
-	return store, func() { store.Close() }
+	return store, func() { _ = store.Close() }
 }
 
 func newSQLiteStore(t *testing.T) (storage.Store, func()) { //nolint:gocritic // named returns not needed for test helper
@@ -50,7 +50,7 @@ func newSQLiteStore(t *testing.T) (storage.Store, func()) { //nolint:gocritic //
 		t.Fatalf("failed to open sqlite store: %v", err)
 	}
 
-	return store, func() { store.Close() }
+	return store, func() { _ = store.Close() }
 }
 
 func TestMigrateBoltToSQLite(t *testing.T) {

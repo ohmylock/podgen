@@ -1260,14 +1260,14 @@ func TestProcessor_UploadPodcastImage(t *testing.T) {
 
 			// Ensure podcast folder exists for generated images
 			podcastDir := filepath.Join(dir, tt.podcastFolder)
-			err := os.MkdirAll(podcastDir, 0o755)
+			err := os.MkdirAll(podcastDir, 0o750)
 			require.NoError(t, err)
 
 			// Create image file if it should exist
 			var imagePath string
 			if tt.imageExists {
 				imagePath = filepath.Join(podcastDir, tt.imageFile)
-				err := os.WriteFile(imagePath, []byte("fake image data"), 0o644)
+				err := os.WriteFile(imagePath, []byte("fake image data"), 0o600)
 				require.NoError(t, err)
 			}
 
@@ -1315,9 +1315,9 @@ func TestProcessor_UploadPodcastImage(t *testing.T) {
 				require.NoError(t, statErr, "generated image should exist")
 
 				// Verify generated image has correct dimensions (3000x3000)
-				file, openErr := os.Open(generatedPath)
+				file, openErr := os.Open(generatedPath) //nolint:gosec // test file path from t.TempDir()
 				require.NoError(t, openErr)
-				defer file.Close()
+				defer func() { _ = file.Close() }()
 
 				cfg, _, decodeErr := image.DecodeConfig(file)
 				require.NoError(t, decodeErr)
@@ -1337,7 +1337,7 @@ func TestProcessor_UploadPodcastImage_GeneratedImageDeterministic(t *testing.T) 
 
 	// Ensure podcast folder exists
 	podcastDir := filepath.Join(dir, podcastFolder)
-	mkdirErr := os.MkdirAll(podcastDir, 0o755)
+	mkdirErr := os.MkdirAll(podcastDir, 0o750)
 	require.NoError(t, mkdirErr)
 
 	s3 := &mocks.ObjectStorageMock{
@@ -1367,7 +1367,7 @@ func TestProcessor_UploadPodcastImage_GeneratedImageDeterministic(t *testing.T) 
 
 	// Read generated image
 	generatedPath1 := filepath.Join(dir, podcastFolder, "podcast.generated.png")
-	data1, readErr1 := os.ReadFile(generatedPath1)
+	data1, readErr1 := os.ReadFile(generatedPath1) //nolint:gosec // test file path from t.TempDir()
 	require.NoError(t, readErr1)
 
 	// Remove the generated image to test idempotency
@@ -1386,7 +1386,7 @@ func TestProcessor_UploadPodcastImage_GeneratedImageDeterministic(t *testing.T) 
 	require.NoError(t, err2)
 
 	// Read newly generated image
-	data2, readErr2 := os.ReadFile(generatedPath1)
+	data2, readErr2 := os.ReadFile(generatedPath1) //nolint:gosec // test file path from t.TempDir()
 	require.NoError(t, readErr2)
 
 	// Verify both images are identical (same seed produces same output)

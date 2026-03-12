@@ -17,7 +17,7 @@ func createTaggedMP3(t *testing.T, title, artist, album, year, comment string) s
 	f, err := os.CreateTemp(t.TempDir(), "test-*.mp3")
 	require.NoError(t, err)
 	name := f.Name()
-	f.Close()
+	_ = f.Close()
 
 	tag, err := id3v2.Open(name, id3v2.Options{Parse: true})
 	require.NoError(t, err)
@@ -37,7 +37,7 @@ func createTaggedMP3(t *testing.T, title, artist, album, year, comment string) s
 	}
 
 	require.NoError(t, tag.Save())
-	tag.Close()
+	_ = tag.Close()
 
 	return name
 }
