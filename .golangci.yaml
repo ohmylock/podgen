@@ -2,6 +2,8 @@ version: "2"
 
 run:
   timeout: 5m
+  skip-dirs:
+    - vendor
 
 linters:
   enable:
@@ -19,8 +21,6 @@ linters:
   disable:
     - revive
   settings:
-    govet:
-      shadow: true
     goconst:
       min-len: 2
       min-occurrences: 2
@@ -40,7 +40,3 @@ linters:
         - singleCaseSwitch
         - ifElseChain
         - exitAfterDefer
-
-issues:
-  exclude-dirs:
-    - vendor
