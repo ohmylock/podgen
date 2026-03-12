@@ -196,8 +196,11 @@ func TestFindEpisodesByStatusNoBucket(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
 
-	_, err := store.FindEpisodesByStatus("nonexistent-podcast", podcast.New)
-	assert.Error(t, err)
+	// For new podcasts (no bucket yet), should return empty slice, not error.
+	// This matches SQLite behavior and allows scanning new podcasts.
+	episodes, err := store.FindEpisodesByStatus("nonexistent-podcast", podcast.New)
+	require.NoError(t, err)
+	assert.Empty(t, episodes)
 }
 
 func TestFindEpisodesBySession(t *testing.T) {
@@ -237,8 +240,11 @@ func TestFindEpisodesBySessionNoBucket(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
 
-	_, err := store.FindEpisodesBySession("nonexistent-podcast", "session1")
-	assert.Error(t, err)
+	// For new podcasts (no bucket yet), should return empty slice, not error.
+	// This matches SQLite behavior and allows querying new podcasts.
+	episodes, err := store.FindEpisodesBySession("nonexistent-podcast", "session1")
+	require.NoError(t, err)
+	assert.Empty(t, episodes)
 }
 
 func TestChangeStatusEpisodes(t *testing.T) {
@@ -311,10 +317,11 @@ func TestFindEpisodesBySizeLimitNoBucket(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
 
-	// Should return nil, nil for non-existent podcast
+	// For new podcasts (no bucket yet), should return empty slice, not error.
+	// This matches SQLite behavior and allows querying new podcasts.
 	result, err := store.FindEpisodesBySizeLimit("nonexistent-podcast", podcast.New, 100)
 	require.NoError(t, err)
-	assert.Nil(t, result)
+	assert.Empty(t, result)
 }
 
 func TestGetEpisodeByFilename(t *testing.T) {

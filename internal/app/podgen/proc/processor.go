@@ -132,6 +132,8 @@ func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, p
 		// parallel S3 deletes within chunk
 		tasks := make([]func(ctx context.Context) error, len(chunk))
 		for j, episode := range chunk {
+			j := j             // capture loop variable
+			episode := episode // capture loop variable
 			tasks[j] = func(ctx context.Context) error {
 				// Note: verbose logging removed to avoid interfering with progress bar display
 				if p.Progress != nil {

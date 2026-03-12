@@ -126,8 +126,8 @@ func (s *Store) findEpisodesByStatus(tx *bolt.Tx, podcastID string, filterStatus
 	var result []*podcast.Episode
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
-		log.Printf("no bucket for %s", podcastID)
-		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "FindEpisodesByStatus", Err: apperrors.ErrNoBucket}
+		// Return empty slice for new podcasts (no bucket yet), matching SQLite behavior
+		return []*podcast.Episode{}, nil
 	}
 
 	c := bucket.Cursor()
@@ -165,7 +165,8 @@ func (s *Store) findEpisodesBySession(tx *bolt.Tx, podcastID, session string) ([
 	var result []*podcast.Episode
 	bucket := tx.Bucket([]byte(podcastID))
 	if bucket == nil {
-		return nil, &apperrors.EpisodeError{PodcastID: podcastID, Op: "FindEpisodesBySession", Err: apperrors.ErrNoBucket}
+		// Return empty slice for new podcasts (no bucket yet), matching SQLite behavior
+		return []*podcast.Episode{}, nil
 	}
 
 	c := bucket.Cursor()
