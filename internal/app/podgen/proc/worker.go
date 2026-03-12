@@ -3,6 +3,8 @@ package proc
 import (
 	"context"
 	"sync"
+
+	"podgen/internal/app/podgen/podcast"
 )
 
 // RunParallel executes functions with bounded concurrency.
@@ -32,4 +34,67 @@ func RunParallel(ctx context.Context, workers int, tasks []func(ctx context.Cont
 
 	wg.Wait()
 	return errs
+}
+
+// UploadTask represents a single upload job to be processed by a worker.
+type UploadTask struct {
+	Index     int
+	PodcastID string
+	Folder    string
+	Episode   *podcast.Episode
+}
+
+// UploadTaskResult holds the outcome of a single upload task.
+type UploadTaskResult struct {
+	Index    int
+	Episode  *podcast.Episode
+	Location string
+	Err      error
+}
+
+// UploadFn is the function signature for processing a single upload task.
+// workerID is stable for the lifetime of the worker goroutine (0, 1, 2, ...).
+type UploadFn func(ctx context.Context, workerID int, task UploadTask) UploadTaskResult
+
+// RunWorkerPool starts a pool of workers that process tasks from the tasks channel.
+// Each worker has a stable workerID (0..workers-1) for progress reporting.
+// Results are sent to the returned channel, which is closed when all tasks are done.
+// Context cancellation stops workers after their current task completes.
+func RunWorkerPool(ctx context.Context, workers int, tasks <-chan UploadTask, uploadFn UploadFn) <-chan UploadTaskResult {
+	if workers <= 0 {
+		workers = 1
+	}
+
+	results := make(chan UploadTaskResult, workers)
+
+	var wg sync.WaitGroup
+	for workerID := 0; workerID < workers; workerID++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case task, ok := <-tasks:
+					if !ok {
+						return
+					}
+					result := uploadFn(ctx, workerID, task)
+					select {
+					case results <- result:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}(workerID)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	return results
 }
