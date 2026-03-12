@@ -25,7 +25,7 @@ cover:
 	@rm -f coverage.out
 
 lint:
-	golangci-lint run --max-issues-per-linter=0 --max-same-issues=0 2>/dev/null || go vet ./...
+	golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
 
 fmt:
 	gofmt -s -w $$(find . -type f -name "*.go" -not -path "./vendor/*")
@@ -72,7 +72,7 @@ help:
 	@echo "  make test        Run tests with race detector"
 	@echo "  make cover       Run tests with coverage report"
 	@echo "  make race        Run tests with race detector (60s timeout)"
-	@echo "  make lint        Run golangci-lint (fallback: go vet)"
+	@echo "  make lint        Run golangci-lint"
 	@echo "  make fmt         Format code (gofmt + goimports)"
 	@echo "  make version     Show version info (branch, hash, timestamp)"
 	@echo ""
