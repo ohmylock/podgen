@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Config search priority: `--conf` flag → `~/.config/podgen/` → `./podgen.yml` → `./configs/podgen.yml`
 
 - **First-run experience:**
-  - Auto-create config template on first run
+  - Auto-create config template at `~/.config/podgen/config.yaml` on first run
   - Welcome message with setup instructions
-  - No errors on fresh install
+  - No errors on fresh install — empty config is valid
+  - `--add` command auto-creates config if missing
+  - `storage.folder` defaults to current directory if not set
 
 ## [0.1.0] - 2026-03-12
 
