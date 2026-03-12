@@ -2,18 +2,16 @@
 package podgen
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
-	"os"
-	"path"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/boltdb/bolt"
 	log "github.com/go-pkgz/lgr"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"podgen/internal/app/podgen/artwork"
 	"podgen/internal/app/podgen/proc"
 	"podgen/internal/configs"
 )
@@ -32,23 +30,6 @@ func NewApplication(conf *configs.Conf, p *proc.Processor) (*App, error) {
 	return &app, nil
 }
 
-// NewBoltDB create boltDb instance
-func NewBoltDB(dbFile string) (*bolt.DB, error) {
-	log.Printf("[INFO] bolt (persistent) store, %s", dbFile)
-	if dbFile == "" {
-		return nil, fmt.Errorf("empty db")
-	}
-	if err := os.MkdirAll(path.Dir(dbFile), 0o700); err != nil {
-		return nil, err
-	}
-	db, err := bolt.Open(dbFile, 0o600, &bolt.Options{Timeout: 1 * time.Second}) // nolint
-	if err != nil {
-		return nil, err
-	}
-
-	return db, err
-}
-
 // NewS3Client create s3 client instance
 func NewS3Client(endpoint, accessKeyID, secretAccessKey string, useSSL bool) (*minio.Client, error) {
 	client, err := minio.New(endpoint, &minio.Options{
@@ -63,144 +44,135 @@ func NewS3Client(endpoint, accessKeyID, secretAccessKey string, useSSL bool) (*m
 }
 
 // Update find and add to db new episodes of podcast
-func (a *App) Update(tx *bolt.Tx, podcastIDs string) {
+func (a *App) Update(ctx context.Context, podcastIDs string) error {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
-	wg := sync.WaitGroup{}
-	for i, p := range podcasts {
-		wg.Add(1)
-		go func(i string, p configs.Podcast, tx *bolt.Tx) {
-			defer wg.Done()
-			countNew, err := a.updateFolder(tx, p.Folder, i)
-			if err != nil {
-				return
-			}
-			if countNew > 0 {
-				log.Printf("[INFO] found new %d episodes for %s", countNew, p.Title)
-			}
-		}(i, p, tx)
+	if len(podcasts) == 0 {
+		log.Printf("[WARN] no podcasts found for IDs: %s", podcastIDs)
+		return nil
 	}
-	wg.Wait()
+
+	var errs []error
+	for i, p := range podcasts {
+		log.Printf("[INFO] scanning podcast %s, folder: %s", i, p.Folder)
+		countNew, err := a.processor.Update(ctx, p.Folder, i)
+		if err != nil {
+			log.Printf("[ERROR] can't update folder %s, %v", p.Folder, err)
+			errs = append(errs, fmt.Errorf("update %s: %w", i, err))
+			continue
+		}
+		if countNew > 0 {
+			log.Printf("[INFO] found new %d episodes for %s", countNew, p.Title)
+		} else {
+			log.Printf("[INFO] no new episodes for %s", p.Title)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // UploadEpisodes by podcasts to s3 storage
-func (a *App) UploadEpisodes(tx *bolt.Tx, podcastIDs string) {
+func (a *App) UploadEpisodes(ctx context.Context, podcastIDs string) error {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+
+	if len(podcasts) == 0 {
+		log.Printf("[WARN] no podcasts found for IDs: %s", podcastIDs)
+		return nil
+	}
 
 	session, err := a.makeSessionString()
 	if err != nil {
-		log.Fatalf("[ERROR] can't make session string, %v", err)
+		log.Printf("[ERROR] can't make session string, %v", err)
+		return fmt.Errorf("make session string: %w", err)
 	}
 
 	log.Printf("[INFO] Start session: %s", session)
 
-	wg := sync.WaitGroup{}
+	var errs []error
 	for i, p := range podcasts {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup, i string, session string, p configs.Podcast, tx *bolt.Tx) {
-			defer wg.Done()
-			a.processor.UploadNewEpisodes(tx, session, i, p.Folder, p.MaxSize)
-		}(&wg, i, session, p, tx)
+		log.Printf("[INFO] uploading podcast %s, folder: %s, maxSize: %d", i, p.Folder, p.MaxSize)
+		if err := a.processor.UploadNewEpisodes(ctx, session, i, p.Folder, p.MaxSize); err != nil {
+			log.Printf("[ERROR] can't upload new episodes for %s, %v", i, err)
+			errs = append(errs, fmt.Errorf("upload %s: %w", i, err))
+		}
 	}
-	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // DeleteOldEpisodes delete old episodes by podcasts
-func (a *App) DeleteOldEpisodes(tx *bolt.Tx, podcastIDs string) {
+// If force is true, deletes for all podcasts regardless of delete_old_episodes config
+func (a *App) DeleteOldEpisodes(ctx context.Context, podcastIDs string, force bool) error {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
-	wg := sync.WaitGroup{}
+	var errs []error
 	for i, p := range podcasts {
-		wg.Add(1)
-		go func(i string, p configs.Podcast, tx *bolt.Tx) {
-			defer wg.Done()
+		if !force && !p.DeleteOldEpisodes {
+			continue
+		}
 
-			if !p.DeleteOldEpisodes {
-				return
-			}
-
-			err := a.processor.DeleteOldEpisodesByPodcast(tx, i, p.Folder)
-			if err != nil {
-				log.Fatalf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
-			}
-		}(i, p, tx)
+		err := a.processor.DeleteOldEpisodesByPodcast(ctx, i, p.Folder)
+		if err != nil {
+			log.Printf("[ERROR] can't delete old episodes by podcast %s, %v", i, err)
+			errs = append(errs, fmt.Errorf("delete %s: %w", i, err))
+		}
 	}
-	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // GenerateFeed for podcasts
-func (a *App) GenerateFeed(tx *bolt.Tx, podcastIDs string, podcastImages map[string]string) {
+func (a *App) GenerateFeed(ctx context.Context, podcastIDs string, podcastImages map[string]string) error {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
-	wg := sync.WaitGroup{}
+	var errs []error
 	for i, p := range podcasts {
-		wg.Add(1)
-		go func(i string, p configs.Podcast) {
-			defer wg.Done()
+		podcastImageURL := podcastImages[i]
 
-			podcastImageURL, ok := podcastImages[i]
-			if !ok {
-				podcastImageURL = ""
-			}
-
-			feedFilename, err := a.processor.GenerateFeed(tx, i, p, podcastImageURL)
-			if err != nil {
-				log.Fatalf("%s", err)
-			}
-			uploadInfo := a.processor.UploadFeed(p.Folder, feedFilename)
+		feedFilename, err := a.processor.GenerateFeed(ctx, i, p, podcastImageURL)
+		if err != nil {
+			log.Printf("[ERROR] can't generate feed for %s, %v", i, err)
+			errs = append(errs, fmt.Errorf("generate feed %s: %w", i, err))
+			continue
+		}
+		uploadInfo, err := a.processor.UploadFeed(ctx, p.Folder, feedFilename)
+		if err != nil {
+			log.Printf("[ERROR] can't upload feed for %s, %v", i, err)
+			errs = append(errs, fmt.Errorf("upload feed %s: %w", i, err))
+			continue
+		}
+		if uploadInfo != nil {
 			log.Printf("Feed url %s", uploadInfo.Location)
-		}(i, p)
+		}
 	}
-	wg.Wait()
+	return errors.Join(errs...)
 }
 
-// UploadPodcastImage by podcast to s3 storage
-func (a *App) UploadPodcastImage(podcastIDs string) map[string]string {
+// UploadPodcastImage by podcast to s3 storage.
+// If forceRegenerate is true, artwork is regenerated even if an image already exists.
+// artworkStyle specifies the style for generated artwork.
+func (a *App) UploadPodcastImage(ctx context.Context, podcastIDs string, forceRegenerate bool, artworkStyle string) map[string]string {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
-	var result = make(map[string]string, len(podcasts))
-	var mu sync.Mutex
-	wg := sync.WaitGroup{}
+	result := make(map[string]string, len(podcasts))
 	for i, p := range podcasts {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup, i string, p configs.Podcast) {
-			defer wg.Done()
-
-			imageURL, err := a.processor.UploadPodcastImage(i, p.Folder, podcastDefaultImage)
-			if err != nil {
-				log.Printf("[ERROR] can't upload podcast image %s, %v", podcastDefaultImage, err)
-				return
-			}
-
-			mu.Lock()
-			result[i] = imageURL
-			mu.Unlock()
-		}(&wg, i, p)
+		imageURL, err := a.processor.UploadPodcastImage(ctx, i, p.Folder, podcastDefaultImage, a.config.IsArtworkAutoGenerateEnabled(), forceRegenerate, p.Title, artwork.Style(artworkStyle))
+		if err != nil {
+			log.Printf("[ERROR] can't upload podcast image %s, %v", podcastDefaultImage, err)
+			continue
+		}
+		result[i] = imageURL
 	}
-
-	wg.Wait()
 
 	return result
 }
 
 // GetPodcastImages by podcast from s3 storage
-func (a *App) GetPodcastImages(podcastIDs string) map[string]string {
+func (a *App) GetPodcastImages(ctx context.Context, podcastIDs string) map[string]string {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
-	var result = make(map[string]string, len(podcasts))
-	var mu sync.Mutex
-	wg := sync.WaitGroup{}
+	result := make(map[string]string, len(podcasts))
 	for i, p := range podcasts {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup, i string, p configs.Podcast) {
-			defer wg.Done()
-			imageURL := a.processor.GetPodcastImage(p.Folder, podcastDefaultImage)
-			mu.Lock()
-			result[i] = imageURL
-			mu.Unlock()
-		}(&wg, i, p)
+		imageURL := a.processor.GetPodcastImage(ctx, p.Folder, podcastDefaultImage)
+		result[i] = imageURL
 	}
-	wg.Wait()
 
 	return result
 }
@@ -210,70 +182,51 @@ func (a *App) FindPodcasts() map[string]configs.Podcast {
 	return a.config.Podcasts
 }
 
-// CreateTransaction create transaction for db
-func (a *App) CreateTransaction() (*bolt.Tx, error) {
-	tx, err := a.processor.Storage.CreateTransaction()
-	if err != nil {
-		return nil, err
-	}
+// GetFeedURLs returns RSS feed URLs for specified podcasts
+func (a *App) GetFeedURLs(podcastIDs string) map[string]string {
+	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
+	result := make(map[string]string, len(podcasts))
 
-	return tx, nil
+	for id, p := range podcasts {
+		url, err := a.processor.GetFeedURL(id, p.Folder,
+			a.config.CloudStorage.EndPointURL,
+			a.config.CloudStorage.Bucket)
+		if err != nil {
+			log.Printf("[ERROR] can't get feed URL for %s: %v", id, err)
+			continue
+		}
+		result[id] = url
+	}
+	return result
 }
 
 // RollbackEpisodes rollback last episode by podcasts
-func (a *App) RollbackEpisodes(tx *bolt.Tx, podcastIDs string) {
-
+func (a *App) RollbackEpisodes(ctx context.Context, podcastIDs string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
-	wg := sync.WaitGroup{}
-	for i, p := range podcasts {
-		wg.Add(1)
-		go func(i string, p configs.Podcast) {
-			defer wg.Done()
-
-			err := a.processor.RollbackLastEpisodes(tx, i)
-			if err != nil {
-				log.Printf("[ERROR] can't rollback episode by podcast %s, %v", i, err)
-			}
-		}(i, p)
+	for i := range podcasts {
+		err := a.processor.RollbackLastEpisodes(ctx, i)
+		if err != nil {
+			log.Printf("[ERROR] can't rollback episode by podcast %s, %v", i, err)
+		}
 	}
-	wg.Wait()
-
 }
 
 // RollbackEpisodesBySession rollback episodes by podcasts and session
-func (a *App) RollbackEpisodesBySession(tx *bolt.Tx, podcastIDs, session string) {
-
+func (a *App) RollbackEpisodesBySession(ctx context.Context, podcastIDs, session string) {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
-	wg := sync.WaitGroup{}
-	for i, p := range podcasts {
-		wg.Add(1)
-		go func(i string, p configs.Podcast) {
-			defer wg.Done()
-
-			err := a.processor.RollbackEpisodesOfSession(tx, i, session)
-			if err != nil {
-				log.Printf("[ERROR] can't rollback episode by podcast %s, %v", i, err)
-			}
-		}(i, p)
+	for i := range podcasts {
+		err := a.processor.RollbackEpisodesOfSession(ctx, i, session)
+		if err != nil {
+			log.Printf("[ERROR] can't rollback episode by podcast %s, %v", i, err)
+		}
 	}
-	wg.Wait()
-
-}
-
-func (a *App) updateFolder(tx *bolt.Tx, folderName, podcastID string) (int64, error) {
-	countNew, err := a.processor.Update(tx, folderName, podcastID)
-	if err != nil {
-		return 0, err
-	}
-
-	return countNew, nil
 }
 
 func (a *App) filterPodcastsByPodcastIDs(podcastIDs string) map[string]configs.Podcast {
 	podcasts := a.FindPodcasts()
-	var result = make(map[string]configs.Podcast, len(podcasts))
+	result := make(map[string]configs.Podcast, len(podcasts))
 	splitPodcastIDs := strings.Split(podcastIDs, ",")
 	for podcastID, p := range podcasts {
 		for _, rawPodcastID := range splitPodcastIDs {

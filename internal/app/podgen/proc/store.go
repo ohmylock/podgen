@@ -1,250 +1,116 @@
 package proc
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
+	bolt "go.etcd.io/bbolt"
 
-	"github.com/boltdb/bolt"
-	log "github.com/go-pkgz/lgr"
 	"podgen/internal/app/podgen/podcast"
+	boltstore "podgen/internal/storage/bolt"
 )
 
-// BoltDB store
+// BoltDB is a backward-compatible wrapper around storage/bolt.Store.
+//
+// Deprecated: New code should use storage/bolt.Store directly via the factory.
 type BoltDB struct {
+	// DB is kept for backward compatibility with existing code that creates
+	// BoltDB by setting DB directly. New code should use storage/bolt.New()
+	// and call Open() instead.
 	DB *bolt.DB
+
+	// store is the underlying storage implementation.
+	// It's lazily initialized from DB if not set via newFromStore.
+	store *boltstore.Store
 }
 
-// SaveEpisode save episodes to podcast bucket in bolt db
-func (b *BoltDB) SaveEpisode(tx *bolt.Tx, podcastID string, episode *podcast.Episode) error {
-	key, err := b.getEpisodeKey(episode)
-
-	if err != nil {
-		return err
+// NewBoltDBFromStore creates a BoltDB wrapper from an existing storage/bolt.Store.
+// This is the preferred way to create a BoltDB in new code.
+func NewBoltDBFromStore(store *boltstore.Store) *BoltDB {
+	return &BoltDB{
+		DB:    store.DB(),
+		store: store,
 	}
-
-	bucket, err := tx.CreateBucketIfNotExists([]byte(podcastID))
-	if err != nil {
-		return err
-	}
-
-	jdata, err := json.Marshal(episode)
-	if err != nil {
-		return err
-	}
-
-	log.Printf("[INFO] save episode %s - %s", podcastID, episode.Filename)
-	err = bucket.Put(key, jdata)
-	if err != nil {
-		return err
-	}
-
-	return err
 }
 
-// FindEpisodesByStatus get episodes from store by status
-func (b *BoltDB) FindEpisodesByStatus(tx *bolt.Tx, podcastID string, filterStatus podcast.Status) ([]*podcast.Episode, error) {
-	var result []*podcast.Episode
-	bucket := tx.Bucket([]byte(podcastID))
-	if bucket == nil {
-		log.Printf("no bucket for %s", podcastID)
-		return nil, errors.New("no bucket")
+// SaveEpisode saves an episode to the store.
+func (b *BoltDB) SaveEpisode(podcastID string, episode *podcast.Episode) error {
+	if b.store != nil {
+		return b.store.SaveEpisode(podcastID, episode)
 	}
-
-	c := bucket.Cursor()
-	for k, v := c.First(); k != nil; k, v = c.Next() {
-		item := podcast.Episode{}
-		if err := json.Unmarshal(v, &item); err != nil {
-			log.Printf("[WARN] failed to unmarshal, %v", err)
-			continue
-		}
-		if item.Status != filterStatus {
-			continue
-		}
-		result = append(result, &item)
-	}
-
-	return result, nil
+	// Legacy path: use the DB directly with the old implementation
+	return b.saveLegacy(podcastID, episode)
 }
 
-// FindEpisodesBySession get episodes from store by session
-func (b *BoltDB) FindEpisodesBySession(tx *bolt.Tx, podcastID, session string) ([]*podcast.Episode, error) {
-	var result []*podcast.Episode
-	bucket := tx.Bucket([]byte(podcastID))
-	if bucket == nil {
-		log.Fatalf("no bucket for %s", podcastID)
+// FindEpisodesByStatus retrieves all episodes with the given status.
+func (b *BoltDB) FindEpisodesByStatus(podcastID string, status podcast.Status) ([]*podcast.Episode, error) {
+	if b.store != nil {
+		return b.store.FindEpisodesByStatus(podcastID, status)
 	}
-
-	c := bucket.Cursor()
-	for k, v := c.First(); k != nil; k, v = c.Next() {
-		item := podcast.Episode{}
-		if err := json.Unmarshal(v, &item); err != nil {
-			log.Printf("[WARN] failed to unmarshal, %v", err)
-			continue
-		}
-		if item.Session != session {
-			continue
-		}
-
-		result = append(result, &item)
-	}
-
-	return result, nil
+	return b.findByStatusLegacy(podcastID, status)
 }
 
-// ChangeStatusEpisodes change status of episodes in store
+// FindEpisodesBySession retrieves all episodes for a given session.
+func (b *BoltDB) FindEpisodesBySession(podcastID, session string) ([]*podcast.Episode, error) {
+	if b.store != nil {
+		return b.store.FindEpisodesBySession(podcastID, session)
+	}
+	return b.findBySessionLegacy(podcastID, session)
+}
+
+// ChangeStatusEpisodes changes the status of all episodes matching fromStatus to toStatus.
 func (b *BoltDB) ChangeStatusEpisodes(podcastID string, fromStatus, toStatus podcast.Status) error {
-	err := b.DB.Batch(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(podcastID))
-		if bucket == nil {
-			log.Fatalf("no bucket for %s", podcastID)
-		}
-
-		c := bucket.Cursor()
-		for k, v := c.Last(); k != nil; k, v = c.Prev() {
-			item := podcast.Episode{}
-			if err := json.Unmarshal(v, &item); err != nil {
-				log.Printf("[WARN] failed to unmarshal, %v", err)
-				continue
-			}
-			if item.Status != fromStatus {
-				continue
-			}
-
-			item.Status = toStatus
-			jdata, jerr := json.Marshal(&item)
-			if jerr != nil {
-				return jerr
-			}
-
-			if err := bucket.Put(k, jdata); err != nil {
-				return err
-			}
-
-		}
-		return nil
-	})
-
-	return err
+	if b.store != nil {
+		return b.store.ChangeStatusEpisodes(podcastID, fromStatus, toStatus)
+	}
+	return b.changeStatusLegacy(podcastID, fromStatus, toStatus)
 }
 
-// FindEpisodesBySizeLimit get list of episodes with total size limit
-func (b *BoltDB) FindEpisodesBySizeLimit(tx *bolt.Tx, podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
-	episodes, err := b.FindEpisodesByStatus(tx, podcastID, status)
-	if err != nil {
-		log.Printf("[INFO] No episodes in podcast %s", podcastID)
-		return nil, nil
+// FindEpisodesBySizeLimit retrieves episodes up to a total size limit.
+func (b *BoltDB) FindEpisodesBySizeLimit(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
+	if b.store != nil {
+		return b.store.FindEpisodesBySizeLimit(podcastID, status, sizeLimit)
 	}
-	var sizes int64
-	var result = make([]*podcast.Episode, len(episodes))
-	for i, episode := range episodes {
-		if sizeLimit > 0 && (sizes >= sizeLimit || (sizes+episode.Size) >= sizeLimit) {
-			return result[:i], nil
-		}
-		sizes += episode.Size
-		result[i] = episode
-	}
-
-	return result, nil
+	return b.findBySizeLimitLegacy(podcastID, status, sizeLimit)
 }
 
-// GetEpisodeByFilename get episode by filename from store
-func (b *BoltDB) GetEpisodeByFilename(tx *bolt.Tx, podcastID, fileName string) (*podcast.Episode, error) {
-	key, err := b.getEpisodeKeyByFilename(fileName)
-	if err != nil {
-		return nil, err
+// GetEpisodeByFilename retrieves an episode by its filename.
+func (b *BoltDB) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episode, error) {
+	if b.store != nil {
+		return b.store.GetEpisodeByFilename(podcastID, fileName)
 	}
-
-	episode := &podcast.Episode{}
-	bucket := tx.Bucket([]byte(podcastID))
-	if bucket == nil {
-		log.Printf("[WARN] no bucket for %s", podcastID)
-		return nil, fmt.Errorf("no bucket for %s", podcastID)
-	}
-
-	item := bucket.Get(key)
-	if item == nil {
-		return nil, errors.New("no episode found")
-	}
-
-	if err = json.Unmarshal(item, episode); err != nil {
-		log.Printf("[WARN] failed to unmarshal, %v", err)
-		return nil, err
-	}
-
-	if episode.Filename == "" {
-		return nil, nil
-	}
-
-	return episode, nil
+	return b.getByFilenameLegacy(podcastID, fileName)
 }
 
-// GetLastEpisodeByStatus get last episode from store by status
+// GetLastEpisodeByStatus retrieves the last episode with the given status.
 func (b *BoltDB) GetLastEpisodeByStatus(podcastID string, status podcast.Status) (*podcast.Episode, error) {
-	var result *podcast.Episode
-	err := b.DB.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(podcastID))
-		if bucket == nil {
-			log.Fatalf("no bucket for %s", podcastID)
-		}
-
-		c := bucket.Cursor()
-		for k, v := c.Last(); k != nil; k, v = c.Prev() {
-			item := podcast.Episode{}
-			if err := json.Unmarshal(v, &item); err != nil {
-				log.Printf("[WARN] failed to unmarshal, %v", err)
-				continue
-			}
-
-			if item.Status != status {
-				continue
-			}
-
-			result = &item
-			break
-		}
-		return nil
-	})
-
-	return result, err
-}
-
-// GetLastEpisodeByNotStatus get last episode from store by not status
-func (b *BoltDB) GetLastEpisodeByNotStatus(tx *bolt.Tx, podcastID string, status podcast.Status) (*podcast.Episode, error) {
-	var result *podcast.Episode
-	bucket := tx.Bucket([]byte(podcastID))
-	if bucket == nil {
-		log.Fatalf("no bucket for %s", podcastID)
+	if b.store != nil {
+		return b.store.GetLastEpisodeByStatus(podcastID, status)
 	}
+	return b.getLastByStatusLegacy(podcastID, status)
+}
 
-	c := bucket.Cursor()
-	for k, v := c.Last(); k != nil; k, v = c.Prev() {
-		item := podcast.Episode{}
-		if err := json.Unmarshal(v, &item); err != nil {
-			log.Printf("[WARN] failed to unmarshal, %v", err)
-			continue
-		}
-
-		if item.Status == status {
-			continue
-		}
-
-		result = &item
-		break
+// GetLastEpisodeByNotStatus retrieves the last episode that doesn't have the given status.
+func (b *BoltDB) GetLastEpisodeByNotStatus(podcastID string, status podcast.Status) (*podcast.Episode, error) {
+	if b.store != nil {
+		return b.store.GetLastEpisodeByNotStatus(podcastID, status)
 	}
-
-	return result, nil
+	return b.getLastByNotStatusLegacy(podcastID, status)
 }
 
-// CreateTransaction create transaction
-func (b *BoltDB) CreateTransaction() (*bolt.Tx, error) {
-	return b.DB.Begin(true)
+// WithWriteTx executes fn within a serialized write transaction.
+//
+// Deprecated: This method exposes bolt internals. Use the storage interface methods instead.
+func (b *BoltDB) WithWriteTx(fn func(*bolt.Tx) error) error {
+	if b.store != nil {
+		return b.store.WithWriteTx(fn)
+	}
+	return b.DB.Update(fn)
 }
 
-func (b *BoltDB) getEpisodeKey(episode *podcast.Episode) ([]byte, error) {
-	return b.getEpisodeKeyByFilename(episode.Filename)
-}
-
-func (b *BoltDB) getEpisodeKeyByFilename(filename string) ([]byte, error) {
-	return []byte(filename), nil
+// WithReadTx executes fn within a read-only transaction.
+//
+// Deprecated: This method exposes bolt internals. Use the storage interface methods instead.
+func (b *BoltDB) WithReadTx(fn func(*bolt.Tx) error) error {
+	if b.store != nil {
+		return b.store.WithReadTx(fn)
+	}
+	return b.DB.View(fn)
 }

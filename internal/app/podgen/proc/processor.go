@@ -5,22 +5,25 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"html"
 	"os"
-	"sync"
+	"strings"
 
-	"github.com/boltdb/bolt"
 	log "github.com/go-pkgz/lgr"
-	"github.com/minio/minio-go/v7"
+	"podgen/internal/app/podgen/artwork"
 	"podgen/internal/app/podgen/podcast"
 	"podgen/internal/configs"
+	"podgen/internal/storage"
 )
 
 // Processor is searcher of episode files and writer to store
 type Processor struct {
-	Storage   *BoltDB
-	Files     *Files
-	S3Client  *S3Store
-	ChunkSize int
+	Storage     EpisodeStore
+	Files       FileScanner
+	S3Client    ObjectStorage
+	Progress    ProgressReporter
+	StoragePath string
+	ChunkSize   int
 }
 
 // UploadedEpisode struct for result of upload
@@ -37,31 +40,37 @@ type DeletedEpisode struct {
 }
 
 // Update podcast files
-func (p *Processor) Update(tx *bolt.Tx, folderName, podcastID string) (int64, error) {
+func (p *Processor) Update(ctx context.Context, folderName, podcastID string) (int64, error) {
 	var countNew int64
 	episodes, err := p.Files.FindEpisodes(folderName)
 	if err != nil {
-		log.Fatalf("[ERROR] can't scan folder %s, %v", folderName, err)
 		return 0, err
 	}
 
 	for _, episode := range episodes {
+		select {
+		case <-ctx.Done():
+			return countNew, ctx.Err()
+		default:
+		}
+
 		if episode == nil {
 			continue
 		}
-		item, err := p.Storage.GetEpisodeByFilename(tx, podcastID, episode.Filename)
-		if err != nil {
-			log.Printf("get episode by filename error, %v", err)
+		item, err := p.Storage.GetEpisodeByFilename(podcastID, episode.Filename)
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
+			return 0, fmt.Errorf("failed to check episode %s: %w", episode.Filename, err)
 		}
 
 		if item != nil {
 			continue
 		}
 
-		e := p.Storage.SaveEpisode(tx, podcastID, episode)
+		e := p.Storage.SaveEpisode(podcastID, episode)
 		if e != nil {
-			log.Fatalf("[ERROR] can't add episode %s to %s, %v", episode.Filename, podcastID, e)
+			return 0, fmt.Errorf("can't add episode %s to %s, %w", episode.Filename, podcastID, e)
 		}
+		log.Printf("[INFO] added new episode: %s", episode.Filename)
 		countNew++
 	}
 
@@ -69,61 +78,117 @@ func (p *Processor) Update(tx *bolt.Tx, folderName, podcastID string) (int64, er
 }
 
 // DeleteOldEpisodesByPodcast from s3 storage
-func (p *Processor) DeleteOldEpisodesByPodcast(tx *bolt.Tx, podcastID, podcastFolder string) error {
-	episodes, err := p.Storage.FindEpisodesByStatus(tx, podcastID, podcast.Uploaded)
+func (p *Processor) DeleteOldEpisodesByPodcast(ctx context.Context, podcastID, podcastFolder string) error {
+	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
 	if err != nil {
-		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
-	}
-	deleteCh := make(chan DeletedEpisode)
-	done := make(chan bool)
-	wg := sync.WaitGroup{}
-	ctx := context.Background()
-	for _, episode := range episodes {
-		wg.Add(1)
-
-		go func(deleteCh chan DeletedEpisode, podcastID string, episodeItem *podcast.Episode) {
-			defer wg.Done()
-			log.Printf("[INFO] Started delete episode %s - %s", podcastID, episodeItem.Filename)
-			err := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
-			if err != nil {
-				log.Printf("[ERROR] can't delete episode %s, %v", episodeItem.Filename, err)
-				return
-			}
-
-			log.Printf("[INFO] Episode deleted %s - %s", episodeItem.Filename, podcastID)
-			deleteCh <- DeletedEpisode{PodcastID: podcastID, Filename: episodeItem.Filename}
-		}(deleteCh, podcastID, episode)
+		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
-	go func() {
-		wg.Wait()
-		done <- true
-	}()
+	if len(episodes) == 0 {
+		log.Printf("[INFO] No old episodes to delete for %s", podcastID)
+		return nil
+	}
 
-Loop:
-	for {
+	log.Printf("[INFO] Found %d old episodes to delete for %s", len(episodes), podcastID)
+	if p.Progress != nil {
+		p.Progress.Reset(len(episodes))
+		defer p.Progress.Finish()
+	}
+
+	// ensure valid chunk size to avoid division by zero
+	chunkSize := p.ChunkSize
+	if chunkSize <= 0 {
+		chunkSize = 1
+	}
+
+	// track which episodes were successfully deleted
+	type deleteResult struct {
+		filename string
+		ok       bool
+	}
+	results := make([]deleteResult, len(episodes))
+	for i, ep := range episodes {
+		results[i].filename = ep.Filename
+	}
+
+	var deleteErrs []error
+
+	// process in chunks - parallel S3 deletes, then immediate DB updates per chunk
+	// this ensures each worker slot (0 to chunkSize-1) is used by exactly one task at a time
+	// DB updates happen after each chunk to prevent inconsistency if context is canceled between chunks
+	for i := 0; i < len(episodes); i += chunkSize {
 		select {
-		case deletedEpisode := <-deleteCh:
-			episode, err := p.Storage.GetEpisodeByFilename(tx, deletedEpisode.PodcastID, deletedEpisode.Filename)
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		end := i + chunkSize
+		if end > len(episodes) {
+			end = len(episodes)
+		}
+		chunk := episodes[i:end]
+
+		// parallel S3 deletes within chunk
+		tasks := make([]func(ctx context.Context) error, len(chunk))
+		for j, episode := range chunk {
+			j := j             // capture loop variable
+			episode := episode // capture loop variable
+			tasks[j] = func(ctx context.Context) error {
+				// Note: verbose logging removed to avoid interfering with progress bar display
+				if p.Progress != nil {
+					p.Progress.StartFile(j, episode.Filename, 0)
+				}
+				delErr := p.S3Client.DeleteEpisode(ctx, fmt.Sprintf("%s/%s", podcastFolder, episode.Filename))
+				if p.Progress != nil {
+					p.Progress.CompleteFile(j, 0, delErr)
+				}
+				return delErr
+			}
+		}
+
+		errs := RunParallel(ctx, chunkSize, tasks)
+
+		// mark successful results, collect errors for this chunk
+		for j, err := range errs {
+			resultIdx := i + j
 			if err != nil {
-				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", deletedEpisode.PodcastID, deletedEpisode.Filename, err)
+				log.Printf("[ERROR] can't delete episode %s, %v", results[resultIdx].filename, err)
+				deleteErrs = append(deleteErrs, fmt.Errorf("delete %s: %w", results[resultIdx].filename, err))
+				continue
+			}
+			results[resultIdx].ok = true
+		}
+
+		// update DB status immediately after each chunk to prevent S3/DB inconsistency on cancellation
+		for j := i; j < end; j++ {
+			if !results[j].ok {
+				continue
+			}
+			episode, err := p.Storage.GetEpisodeByFilename(podcastID, results[j].filename)
+			if err != nil {
+				log.Printf("[ERROR] can't get episode by filename %s - %s, %v", podcastID, results[j].filename, err)
+				deleteErrs = append(deleteErrs, fmt.Errorf("get episode %s: %w", results[j].filename, err))
+				continue
+			}
+			if episode == nil {
+				log.Printf("[WARN] episode not found after delete: %s - %s", podcastID, results[j].filename)
+				continue
 			}
 			episode.Status = podcast.Deleted
-			if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
+			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
 				log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
+				deleteErrs = append(deleteErrs, fmt.Errorf("save episode %s: %w", episode.Filename, err))
 			}
-		case <-done:
-			close(deleteCh)
-			close(done)
-			break Loop
 		}
 	}
-	return nil
+
+	return errors.Join(deleteErrs...)
 }
 
 // RollbackLastEpisodes last deleted episode
-func (p *Processor) RollbackLastEpisodes(tx *bolt.Tx, podcastID string) error {
-	episode, err := p.Storage.GetLastEpisodeByNotStatus(tx, podcastID, podcast.New)
+func (p *Processor) RollbackLastEpisodes(ctx context.Context, podcastID string) error {
+	episode, err := p.Storage.GetLastEpisodeByNotStatus(podcastID, podcast.New)
 	if err != nil {
 		log.Printf("[ERROR] can't find episodes %s, %v", podcastID, err)
 		return err
@@ -135,11 +200,11 @@ func (p *Processor) RollbackLastEpisodes(tx *bolt.Tx, podcastID string) error {
 	}
 
 	if episode.Session != "" {
-		return p.RollbackEpisodesOfSession(tx, podcastID, episode.Session)
+		return p.RollbackEpisodesOfSession(ctx, podcastID, episode.Session)
 	}
 
 	episode.Status = podcast.New
-	if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
+	if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
 		log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
 		return err
 	}
@@ -148,8 +213,8 @@ func (p *Processor) RollbackLastEpisodes(tx *bolt.Tx, podcastID string) error {
 }
 
 // RollbackEpisodesOfSession last deleted episode of session
-func (p *Processor) RollbackEpisodesOfSession(tx *bolt.Tx, podcastID, session string) error {
-	episodes, err := p.Storage.FindEpisodesBySession(tx, podcastID, session)
+func (p *Processor) RollbackEpisodesOfSession(ctx context.Context, podcastID, session string) error {
+	episodes, err := p.Storage.FindEpisodesBySession(podcastID, session)
 	if err != nil {
 		log.Printf("[ERROR] can't find episodes %s, %v", podcastID, err)
 		return err
@@ -163,8 +228,14 @@ func (p *Processor) RollbackEpisodesOfSession(tx *bolt.Tx, podcastID, session st
 	log.Printf("[INFO] Started rollback episodes %s", podcastID)
 
 	for _, episode := range episodes {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		episode.Status = podcast.New
-		if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
+		if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
 			log.Printf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
 			return err
 		}
@@ -175,18 +246,38 @@ func (p *Processor) RollbackEpisodesOfSession(tx *bolt.Tx, podcastID, session st
 	return nil
 }
 
-// UploadPodcastImage to s3 storage
-func (p *Processor) UploadPodcastImage(podcastID, podcastFolder, podcastImageFilename string) (string, error) {
+// UploadPodcastImage to s3 storage.
+// If the image file is not found and autoGenerate is true, artwork is generated using podcastTitle as the label.
+// If forceRegenerate is true, artwork is always regenerated regardless of existing images.
+// artworkStyle specifies the style for generated artwork (empty string uses default).
+func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFolder, podcastImageFilename string, autoGenerate, forceRegenerate bool, podcastTitle string, artworkStyle artwork.Style) (string, error) {
 	log.Printf("[INFO] Started upload podcast image %s - %s", podcastID, podcastImageFilename)
-	ctx := context.Background()
 
-	podcastImagePath := fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, podcastImageFilename)
-	if !CheckFileExists(podcastImagePath) {
-		podcastImagePath = fmt.Sprintf("%s/%s", p.Files.Storage, podcastImageFilename)
-	}
+	podcastImagePath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, podcastImageFilename)
 
-	if !CheckFileExists(podcastImagePath) {
-		return "", errors.New("podcast image not found")
+	// Force regenerate artwork — always generate, no file checks
+	if forceRegenerate {
+		log.Printf("[INFO] Force generating artwork for %s at %s (style: %s)", podcastID, podcastImagePath, artworkStyle)
+		if err := artwork.GenerateWithStyle(podcastID, podcastTitle, podcastImagePath, artworkStyle); err != nil {
+			return "", fmt.Errorf("artwork generation for %s: %w", podcastID, err)
+		}
+	} else {
+		// Normal flow: check if image exists, generate if needed
+		if !CheckFileExists(podcastImagePath) {
+			podcastImagePath = fmt.Sprintf("%s/%s", p.StoragePath, podcastImageFilename)
+		}
+
+		if !CheckFileExists(podcastImagePath) {
+			if !autoGenerate {
+				return "", errors.New("podcast image not found")
+			}
+
+			podcastImagePath = fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, podcastImageFilename)
+			log.Printf("[INFO] Generating artwork for %s at %s (style: %s)", podcastID, podcastImagePath, artworkStyle)
+			if err := artwork.GenerateWithStyle(podcastID, podcastTitle, podcastImagePath, artworkStyle); err != nil {
+				return "", fmt.Errorf("artwork generation for %s: %w", podcastID, err)
+			}
+		}
 	}
 
 	uploadInfo, err := p.S3Client.UploadImage(ctx,
@@ -194,7 +285,7 @@ func (p *Processor) UploadPodcastImage(podcastID, podcastFolder, podcastImageFil
 		podcastImagePath)
 
 	if err != nil {
-		return "", fmt.Errorf("[ERROR] can't upload image %s, %v", podcastImageFilename, err)
+		return "", fmt.Errorf("can't upload image %s: %w", podcastImageFilename, err)
 	}
 
 	log.Printf("[INFO] Image of podcast uploaded %s - %s", podcastImageFilename, uploadInfo.Location)
@@ -203,85 +294,112 @@ func (p *Processor) UploadPodcastImage(podcastID, podcastFolder, podcastImageFil
 }
 
 // GetPodcastImage from s3 storage
-func (p *Processor) GetPodcastImage(podcastFolder, podcastImageFilename string) string {
-	ctx := context.Background()
-
+func (p *Processor) GetPodcastImage(ctx context.Context, podcastFolder, podcastImageFilename string) string {
 	imageInfo, err := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, podcastImageFilename))
-
 	if err != nil {
-		log.Printf("[ERROR] can't image info %s, %v", podcastImageFilename, err)
+		log.Printf("[ERROR] can't get image info %s, %v", podcastImageFilename, err)
 		return ""
 	}
 	return imageInfo.Location
 }
 
 // UploadNewEpisodes get new episodes by total limit of size and upload to s3 storage
-func (p *Processor) UploadNewEpisodes(tx *bolt.Tx, session, podcastID, podcastFolder string, sizeLimit int64) {
-	episodes, err := p.Storage.FindEpisodesBySizeLimit(tx, podcastID, podcast.New, sizeLimit)
+func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, podcastFolder string, sizeLimit int64) error {
+	episodes, err := p.Storage.FindEpisodesBySizeLimit(podcastID, podcast.New, sizeLimit)
 	if err != nil {
-		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
+		return fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
-	wg := sync.WaitGroup{}
-	ctx := context.Background()
+	if len(episodes) == 0 {
+		log.Printf("[INFO] No new episodes to upload for %s", podcastID)
+		return nil
+	}
 
-	for i := 0; i < len(episodes); i += p.ChunkSize {
-		uploadCh := make(chan UploadedEpisode)
-		done := make(chan bool)
-		end := i + p.ChunkSize
+	log.Printf("[INFO] Found %d episodes to upload for %s", len(episodes), podcastID)
+	if p.Progress != nil {
+		p.Progress.Reset(len(episodes))
+		defer p.Progress.Finish()
+	}
 
-		if end > len(episodes) {
-			end = len(episodes)
+	workers := p.ChunkSize
+	if workers <= 0 {
+		workers = 1
+	}
+
+	// fill tasks channel upfront so workers can start immediately
+	tasks := make(chan UploadTask, len(episodes))
+	for i, ep := range episodes {
+		tasks <- UploadTask{Index: i, PodcastID: podcastID, Folder: podcastFolder, Episode: ep}
+	}
+	close(tasks)
+
+	// uploadFn uses stable workerID for progress reporting
+	uploadFn := func(ctx context.Context, workerID int, task UploadTask) UploadTaskResult {
+		if p.Progress != nil {
+			p.Progress.StartFile(workerID, task.Episode.Filename, task.Episode.Size)
 		}
-
-		for _, episode := range episodes[i:end] {
-			wg.Add(1)
-			go func(episode *podcast.Episode) {
-				err := p.uploadProcess(ctx, tx, &wg, uploadCh, podcastID, podcastFolder, episode)
-				if err != nil {
-					log.Fatalf("[ERROR] can't upload episode %s, %v", episode.Filename, err)
-				}
-			}(episode)
-		}
-
-		go func() {
-			wg.Wait()
-			done <- true
-		}()
-
-	Loop:
-		for {
-			select {
-			case uploadedEpisode := <-uploadCh:
-				episode, err := p.Storage.GetEpisodeByFilename(tx, uploadedEpisode.PodcastID, uploadedEpisode.Filename)
-				if err != nil {
-					log.Printf("[ERROR] can't get episode by filename %s - %s, %v", uploadedEpisode.PodcastID, uploadedEpisode.Filename, err)
-					return
-				}
-				episode.Session = session
-				episode.Status = podcast.Uploaded
-				episode.Location = uploadedEpisode.Location
-				if err = p.Storage.SaveEpisode(tx, podcastID, episode); err != nil {
-					if rollbackErr := tx.Rollback(); rollbackErr != nil {
-						log.Printf("[ERROR] can't rollback transaction %v", rollbackErr)
-					}
-					log.Fatalf("[ERROR] can't change status episode %s, %v", episode.Filename, err)
-				}
-			case <-done:
-				close(uploadCh)
-				close(done)
-				break Loop
+		var progressFn ProgressFunc
+		if p.Progress != nil {
+			progressFn = func(uploaded, total int64) {
+				p.Progress.UpdateProgress(workerID, uploaded, total)
 			}
 		}
+		result, uploadErr := p.uploadSingleEpisode(ctx, task.PodcastID, task.Folder, task.Episode, progressFn)
+		if p.Progress != nil {
+			p.Progress.CompleteFile(workerID, task.Episode.Size, uploadErr)
+		}
+		return UploadTaskResult{
+			Index:    task.Index,
+			Episode:  task.Episode,
+			Location: result.Location,
+			Err:      uploadErr,
+		}
 	}
 
+	// results channel is closed when all workers finish
+	resultsCh := RunWorkerPool(ctx, workers, tasks, uploadFn)
+
+	// update DB immediately per result — no waiting for a full batch
+	var uploadErrs []error
+	for result := range resultsCh {
+		if result.Err != nil {
+			log.Printf("[ERROR] can't upload episode %s, %v", result.Episode.Filename, result.Err)
+			uploadErrs = append(uploadErrs, fmt.Errorf("upload %s: %w", result.Episode.Filename, result.Err))
+			continue
+		}
+		episode, err := p.Storage.GetEpisodeByFilename(podcastID, result.Episode.Filename)
+		if err != nil {
+			log.Printf("[ERROR] can't get episode by filename %s, %v", result.Episode.Filename, err)
+			uploadErrs = append(uploadErrs, fmt.Errorf("get episode %s: %w", result.Episode.Filename, err))
+			continue
+		}
+		if episode == nil {
+			log.Printf("[ERROR] episode not found after upload: %s", result.Episode.Filename)
+			uploadErrs = append(uploadErrs, fmt.Errorf("episode not found after upload: %s", result.Episode.Filename))
+			continue
+		}
+		episode.Session = session
+		episode.Status = podcast.Uploaded
+		episode.Location = result.Location
+		if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
+			log.Printf("[ERROR] can't save episode %s, %v", episode.Filename, err)
+			uploadErrs = append(uploadErrs, fmt.Errorf("save episode %s: %w", episode.Filename, err))
+			continue
+		}
+	}
+
+	// Include context error if canceled to signal incomplete work
+	if ctx.Err() != nil {
+		uploadErrs = append(uploadErrs, ctx.Err())
+	}
+	return errors.Join(uploadErrs...)
 }
 
 // GenerateFeed to podcast
-func (p *Processor) GenerateFeed(tx *bolt.Tx, podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
-	episodes, err := p.Storage.FindEpisodesByStatus(tx, podcastID, podcast.Uploaded)
+func (p *Processor) GenerateFeed(_ context.Context, podcastID string, podcastEntity configs.Podcast, podcastImageURL string) (string, error) {
+	episodes, err := p.Storage.FindEpisodesByStatus(podcastID, podcast.Uploaded)
 	if err != nil {
-		log.Fatalf("[ERROR] can't find episodes %s, %v", podcastID, err)
+		return "", fmt.Errorf("can't find episodes %s, %w", podcastID, err)
 	}
 
 	var header, body, footer string
@@ -314,77 +432,88 @@ func (p *Processor) GenerateFeed(tx *bolt.Tx, podcastID string, podcastEntity co
 		info["language"] = podcastEntity.Info.Language
 	}
 
+	safeTitle := SanitizeCDATA(podcastEntity.Title)
 	header = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
 		"<rss xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\" " +
 		"xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:atom=\"http://www.w3.org/2005/Atom\" " +
-		"xmlns:googleplay=\"http://www.google.com/schemas/play-podcasts/1.0\" version=\"2.0\">\n" +
+		"xmlns:googleplay=\"http://www.google.com/schemas/play-podcasts/1.0\" " +
+		"xmlns:media=\"http://search.yahoo.com/mrss/\" version=\"2.0\">\n" +
 		"<channel>\n" +
-		fmt.Sprintf("<title>%s</title>\n<description><![CDATA[%s]]></description>\n", podcastEntity.Title, podcastEntity.Title) +
+		fmt.Sprintf("<title>%s</title>\n<description><![CDATA[%s]]></description>\n", html.EscapeString(podcastEntity.Title), safeTitle) +
 		"<generator>PodGen</generator>\n" +
-		fmt.Sprintf("<language>%s</language>\n", info["language"]) +
+		fmt.Sprintf("<language>%s</language>\n", html.EscapeString(info["language"])) +
 		"<itunes:explicit>No</itunes:explicit>\n" +
-		fmt.Sprintf("<itunes:subtitle>%s</itunes:subtitle>\n<itunes:summary><![CDATA[%s]]></itunes:summary>\n", podcastEntity.Title, podcastEntity.Title) +
-		fmt.Sprintf("<itunes:author>%s</itunes:author>\n", info["author"]) +
-		fmt.Sprintf("<author>%s</author>\n", info["author"]) +
+		fmt.Sprintf("<itunes:subtitle>%s</itunes:subtitle>\n<itunes:summary><![CDATA[%s]]></itunes:summary>\n", html.EscapeString(podcastEntity.Title), safeTitle) +
+		fmt.Sprintf("<itunes:author>%s</itunes:author>\n", html.EscapeString(info["author"])) +
+		fmt.Sprintf("<author>%s</author>\n", html.EscapeString(info["author"])) +
 		"<image>\n" +
 		fmt.Sprintf("<url>%s</url>\n", podcastImageURL) +
 		"</image>\n" +
 		fmt.Sprintf("<itunes:image href=%q />\n", podcastImageURL) +
 		"<itunes:owner>\n" +
-		fmt.Sprintf("<itunes:name>%s</itunes:name>\n", info["owner"]) +
-		fmt.Sprintf("<itunes:email>%s</itunes:email>\n", info["email"]) +
+		fmt.Sprintf("<itunes:name>%s</itunes:name>\n", html.EscapeString(info["owner"])) +
+		fmt.Sprintf("<itunes:email>%s</itunes:email>\n", html.EscapeString(info["email"])) +
 		"</itunes:owner>\n" +
-		fmt.Sprintf("<itunes:category text=%q />\n", info["category"])
+		fmt.Sprintf("<itunes:category text=\"%s\" />\n", html.EscapeString(info["category"])) //nolint:gocritic // html.EscapeString handles quote escaping for XML
 
 	footer = "</channel>\n</rss>"
 	for _, episode := range episodes {
-		body += "<item>\n" +
-			fmt.Sprintf("<title>%s</title>\n", episode.Filename) +
-			fmt.Sprintf("<description><![CDATA[%s]]></description>\n", episode.Filename) +
-			fmt.Sprintf("<itunes:summary><![CDATA[%s]]></itunes:summary>\n", episode.Filename) +
+		title := episode.Title
+		if title == "" {
+			title = episode.Filename
+		}
+		desc := BuildItemDescription(episode)
+		item := "<item>\n" +
+			fmt.Sprintf("<title>%s</title>\n", html.EscapeString(title)) +
+			fmt.Sprintf("<description><![CDATA[%s]]></description>\n", desc) +
+			fmt.Sprintf("<itunes:summary><![CDATA[%s]]></itunes:summary>\n", desc) +
 			fmt.Sprintf("<pubDate>%s</pubDate>\n", episode.PubDate) +
 			fmt.Sprintf("<itunes:image href=%q />\n", podcastImageURL) +
 			fmt.Sprintf("<enclosure url=%q type=\"audio/mp3\" length=\"%d\" />\n", episode.Location, episode.Size) +
 			fmt.Sprintf("<media:content url=%q fileSize=\"%d\" type=\"audio/mp3\" />\n", episode.Location, episode.Size) +
-			"<itunes:explicit>No</itunes:explicit>\n" +
-			"</item>\n"
+			"<itunes:explicit>No</itunes:explicit>\n"
+		if episode.Duration != "" {
+			item += fmt.Sprintf("<itunes:duration>%s</itunes:duration>\n", episode.Duration)
+		}
+		item += "</item>\n"
+		body += item
 	}
 
 	feedKey, err := p.getFeedKey(podcastID)
 	if err != nil {
-		log.Fatalf("[ERROR] can't generate feed key for %s, %v", podcastID, err)
+		return "", fmt.Errorf("can't generate feed key for %s, %w", podcastID, err)
 	}
 	feedFilename := fmt.Sprintf("%s.rss", feedKey)
-	feedPath := fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastEntity.Folder, feedFilename)
+	feedPath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastEntity.Folder, feedFilename)
 	f, err := os.Create(feedPath) // nolint
 	if err != nil {
-		log.Fatalf("[ERROR] can't create file %s, %v", feedPath, err)
+		return "", fmt.Errorf("can't create file %s, %w", feedPath, err)
 	}
 	defer func(f *os.File) {
 		if err = f.Close(); err != nil {
-			log.Fatalf("[ERROR] can't close file %s, %v", feedPath, err)
+			log.Printf("[ERROR] can't close file %s, %v", feedPath, err)
 		}
 	}(f)
 
-	if _, err = f.WriteString(fmt.Sprintf("%s\n%s\n%s", header, body, footer)); err != nil {
-		return "", fmt.Errorf("[ERROR] can't write to file %s, %v", feedPath, err)
+	if _, err = fmt.Fprintf(f, "%s\n%s\n%s", header, body, footer); err != nil {
+		return "", fmt.Errorf("can't write to file %s: %w", feedPath, err)
 	}
 
 	return feedFilename, nil
 }
 
 // UploadFeed of podcast to s3 storage
-func (p *Processor) UploadFeed(podcastFolder, feedName string) *minio.UploadInfo {
-	uploadInfo, err := p.S3Client.UploadFeed(context.Background(),
+func (p *Processor) UploadFeed(ctx context.Context, podcastFolder, feedName string) (*UploadResult, error) {
+	uploadInfo, err := p.S3Client.UploadFeed(ctx,
 		fmt.Sprintf("%s/%s", podcastFolder, feedName),
-		fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, feedName))
+		fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, feedName))
 
 	if err != nil {
 		log.Printf("[ERROR] can't upload feed %s, %v", feedName, err)
-		return nil
+		return nil, fmt.Errorf("upload feed %s: %w", feedName, err)
 	}
 
-	return uploadInfo
+	return uploadInfo, nil
 }
 
 func (p *Processor) getFeedKey(podcastID string) (string, error) {
@@ -395,34 +524,94 @@ func (p *Processor) getFeedKey(podcastID string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func (p *Processor) uploadProcess(ctx context.Context, tx *bolt.Tx, wg *sync.WaitGroup, uploadCh chan UploadedEpisode, podcastID, podcastFolder string, episodeItem *podcast.Episode) error {
-	defer wg.Done()
-	log.Printf("[INFO] Started upload episode %s - %s", podcastID, episodeItem.Filename)
-	objectInfo, _ := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
+// GetFeedURL returns the RSS feed URL for a podcast
+func (p *Processor) GetFeedURL(podcastID, podcastFolder, baseURL, bucket string) (string, error) {
+	feedKey, err := p.getFeedKey(podcastID)
+	if err != nil {
+		return "", err
+	}
+	// Preserve original scheme, default to https if no scheme present
+	scheme := "https"
+	cleanURL := baseURL
+	if strings.HasPrefix(baseURL, "https://") {
+		cleanURL = strings.TrimPrefix(baseURL, "https://")
+	} else if strings.HasPrefix(baseURL, "http://") {
+		scheme = "http"
+		cleanURL = strings.TrimPrefix(baseURL, "http://")
+	}
+	return fmt.Sprintf("%s://%s/%s/%s/%s.rss", scheme, cleanURL, bucket, podcastFolder, feedKey), nil
+}
+
+// BuildItemDescription builds an RSS item description from episode metadata.
+// Format: "Artist - Album (Year)\nComment", falling back to filename if all metadata is empty.
+func BuildItemDescription(episode *podcast.Episode) string {
+	var parts []string
+
+	var line1 string
+	switch {
+	case episode.Artist != "" && episode.Album != "" && episode.Year != "":
+		line1 = fmt.Sprintf("%s - %s (%s)", episode.Artist, episode.Album, episode.Year)
+	case episode.Artist != "" && episode.Album != "":
+		line1 = fmt.Sprintf("%s - %s", episode.Artist, episode.Album)
+	case episode.Artist != "":
+		line1 = episode.Artist
+	case episode.Album != "" && episode.Year != "":
+		line1 = fmt.Sprintf("%s (%s)", episode.Album, episode.Year)
+	case episode.Album != "":
+		line1 = episode.Album
+	case episode.Year != "":
+		line1 = episode.Year
+	}
+
+	if line1 != "" {
+		parts = append(parts, line1)
+	}
+	if episode.Comment != "" {
+		parts = append(parts, episode.Comment)
+	}
+
+	if len(parts) == 0 {
+		return SanitizeCDATA(episode.Filename)
+	}
+	return SanitizeCDATA(strings.Join(parts, "\n"))
+}
+
+// SanitizeCDATA escapes the CDATA end sequence "]]>" to prevent XML injection.
+// It replaces "]]>" with "]]]]><![CDATA[>" which safely splits the CDATA section.
+func SanitizeCDATA(s string) string {
+	return strings.ReplaceAll(s, "]]>", "]]]]><![CDATA[>")
+}
+
+func (p *Processor) uploadSingleEpisode(ctx context.Context, podcastID, podcastFolder string, episodeItem *podcast.Episode, progress ProgressFunc) (UploadedEpisode, error) {
+	// Check if file already exists on S3 with same size
+	objectInfo, err := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename))
+	if err != nil {
+		log.Printf("[DEBUG] GetObjectInfo for %s: %v", episodeItem.Filename, err)
+	}
 	var location string
 	if objectInfo != nil && episodeItem.Size == objectInfo.Size {
 		location = objectInfo.Location
+		// Report 100% progress for cached files
+		if progress != nil {
+			progress(episodeItem.Size, episodeItem.Size)
+		}
 	}
 
 	if location == "" {
-		uploadInfo, err := p.S3Client.UploadEpisode(ctx,
+		// Upload with progress tracking
+		uploadInfo, err := p.S3Client.UploadEpisodeWithProgress(ctx,
 			fmt.Sprintf("%s/%s", podcastFolder, episodeItem.Filename),
-			fmt.Sprintf("%s/%s/%s", p.Files.Storage, podcastFolder, episodeItem.Filename))
+			fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, episodeItem.Filename),
+			progress)
 		if err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				log.Printf("[ERROR] can't rollback transaction, %v", rollbackErr)
-			}
-			return err
+			return UploadedEpisode{}, err
 		}
 		location = uploadInfo.Location
 	}
 
-	log.Printf("[INFO] Episode uploaded %s - %s", episodeItem.Filename, location)
-	uploadCh <- UploadedEpisode{
+	return UploadedEpisode{
 		PodcastID: podcastID,
 		Filename:  episodeItem.Filename,
 		Location:  location,
-	}
-
-	return nil
+	}, nil
 }

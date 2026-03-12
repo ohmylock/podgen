@@ -12,6 +12,7 @@ import (
 
 	log "github.com/go-pkgz/lgr"
 	"podgen/internal/app/podgen/podcast"
+	"podgen/internal/pkg/tagger"
 )
 
 // Files for work with files of episodes
@@ -23,12 +24,11 @@ type Files struct {
 func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 	entities, err := f.scanFolder(folderName)
 	if err != nil {
-		log.Fatalf("[ERROR] can't scan folder %s, %v", folderName, err)
 		return nil, err
 	}
 	var re = regexp.MustCompile(`(?m)([12]\d{3}-(0[1-9]|1[012])-(0[1-9]|[12]\d|3[01]))`)
-	var result = make([]*podcast.Episode, len(entities))
-	for i, entity := range entities {
+	var result []*podcast.Episode
+	for _, entity := range entities {
 		if entity.IsDir() {
 			continue
 		}
@@ -39,38 +39,61 @@ func (f *Files) FindEpisodes(folderName string) ([]*podcast.Episode, error) {
 
 		entityInfo, err := entity.Info()
 		if err != nil {
-			log.Fatalf("[ERROR] can't get file info %s in %s, %v", entity.Name(), folderName, err)
 			return nil, err
 		}
 
-		pubDate := time.Now()
+		filePath := fmt.Sprintf("%s/%s/%s", f.Storage, folderName, entity.Name())
+		meta, metaErr := tagger.ReadMetadata(filePath)
+		if metaErr != nil {
+			log.Printf("[WARN] could not read ID3 tags from %s: %v", entity.Name(), metaErr)
+		}
 
-		matches := re.FindAllString(entity.Name(), -1)
-		if matches != nil {
-			match := matches[0]
-			formatDate := "2006-01-02"
-			pubDate, err = time.Parse(formatDate, match)
-			if err != nil {
-				formatDate2 := "2006-01-2"
-				pubDate, err = time.Parse(formatDate2, match)
+		pubDate := time.Now()
+		yearParsed := false
+
+		// Use ID3 Year tag if available
+		if meta.Year != "" {
+			parsed, parseErr := time.Parse("2006", meta.Year)
+			if parseErr == nil {
+				pubDate = parsed
+				yearParsed = true
+			} else {
+				log.Printf("[WARN] could not parse ID3 Year %q from %s: %v", meta.Year, entity.Name(), parseErr)
+			}
+		}
+
+		// Fall back to filename date regex if Year tag unavailable or unparseable
+		if !yearParsed {
+			matches := re.FindAllString(entity.Name(), -1)
+			if matches != nil {
+				match := matches[0]
+				formatDate := "2006-01-02"
+				pubDate, err = time.Parse(formatDate, match)
 				if err != nil {
-					log.Printf("[WARN] %s, %v", match, err)
+					formatDate2 := "2006-01-2"
+					pubDate, err = time.Parse(formatDate2, match)
+					if err != nil {
+						log.Printf("[WARN] %s, %v", match, err)
+					}
 				}
 			}
 		}
 
-		result[i] = &podcast.Episode{
+		result = append(result, &podcast.Episode{
 			Filename: entity.Name(),
 			Size:     entityInfo.Size(),
 			Status:   podcast.New,
 			PubDate:  pubDate.Format(time.RFC1123Z),
-		}
+			Title:    meta.Title,
+			Artist:   meta.Artist,
+			Album:    meta.Album,
+			Year:     meta.Year,
+			Comment:  meta.Comment,
+			Duration: meta.Duration,
+		})
 	}
 
 	sort.SliceStable(result, func(i, j int) bool {
-		if result[i] == nil || result[j] == nil {
-			return false
-		}
 		return result[i].Filename < result[j].Filename
 	})
 

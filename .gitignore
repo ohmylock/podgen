@@ -1,22 +1,57 @@
-# phpstorm project files
-.idea
-/*.iml
+# Claude Code
+.claude/
 
-# Mac DS_Store Files
+# Build artifacts
+bin/
+!bin/.gitkeep
+dist/
+/podgen
+*.exe
+
+# Test/coverage
+coverage.out
+cover.out
+*.test
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.iml
+
+# OS
 .DS_Store
+Thumbs.db
 
+# Project config (may contain secrets)
 /configs/*.yml
+podgen.yml
+*.env
+!*.env.example
+
+# Storage (local data)
 /storage/*
 !/storage/.gitkeep
-!/storage/podcast.png
 
-/bin/*
-!/bin/.gitkeep
+# Database files
+*.bdb
+*.sqlite
+*.db
 
+# Var directory
 /var/*
 !/var/.gitkeep
 
-dist/
-/docs/plans/
-/podgen
-/.claude/
+# Development logs
+progress*.txt
+
+# Internal development docs
+/docs/
+docs/plans/
+docs/reviews/
+docs/issues/
+
+# Ralphex
+.ralphex/
+

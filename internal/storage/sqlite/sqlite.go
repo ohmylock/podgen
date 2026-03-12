@@ -1,0 +1,431 @@
+// Package sqlite provides a SQLite-based implementation of the storage.Store interface.
+package sqlite
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	log "github.com/go-pkgz/lgr"
+	_ "modernc.org/sqlite"
+
+	"podgen/internal/app/podgen/podcast"
+	"podgen/internal/storage"
+)
+
+// Store implements storage.Store using SQLite with WAL mode.
+type Store struct {
+	db     *sql.DB
+	dsn    string
+	config storage.Config
+}
+
+// New creates a new SQLite store with the given configuration.
+// The store must be opened with Open() before use.
+func New(cfg storage.Config) *Store {
+	return &Store{
+		dsn:    cfg.DSN,
+		config: cfg,
+	}
+}
+
+// Open initializes the SQLite database connection with WAL mode.
+func (s *Store) Open() error {
+	if s.dsn == "" {
+		return fmt.Errorf("empty db path: %w", storage.ErrInvalidConfig)
+	}
+
+	// Create parent directories if they don't exist
+	if dir := filepath.Dir(s.dsn); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("failed to create db directory: %w", err)
+		}
+	}
+
+	dsn := fmt.Sprintf("file:%s?cache=shared&mode=rwc", s.dsn)
+
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("failed to open sqlite database: %w", err)
+	}
+
+	// Configure connection pool
+	maxOpen := s.config.MaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = 10
+	}
+	maxIdle := s.config.MaxIdleConns
+	if maxIdle <= 0 {
+		maxIdle = 5
+	}
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
+
+	// Verify connection
+	if err = db.Ping(); err != nil {
+		_ = db.Close()
+		return fmt.Errorf("failed to ping sqlite database: %w", err)
+	}
+
+	// Enable WAL mode and other pragmas
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA busy_timeout=5000",
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA synchronous=NORMAL",
+	}
+	for _, pragma := range pragmas {
+		if _, err = db.Exec(pragma); err != nil {
+			_ = db.Close()
+			return fmt.Errorf("failed to execute %s: %w", pragma, err)
+		}
+	}
+
+	s.db = db
+
+	// Create schema
+	if err = s.createSchema(); err != nil {
+		_ = s.db.Close()
+		return fmt.Errorf("failed to create schema: %w", err)
+	}
+
+	log.Printf("[INFO] SQLite store opened: %s (WAL mode enabled)", s.dsn)
+	return nil
+}
+
+// createSchema creates the necessary tables and indexes.
+func (s *Store) createSchema() error {
+	schema := `
+		CREATE TABLE IF NOT EXISTS episodes (
+			podcast_id TEXT NOT NULL,
+			filename TEXT NOT NULL,
+			pub_date TEXT,
+			size INTEGER DEFAULT 0,
+			status INTEGER DEFAULT 0,
+			location TEXT,
+			session TEXT,
+			title TEXT,
+			artist TEXT,
+			album TEXT,
+			year TEXT,
+			comment TEXT,
+			duration TEXT,
+			PRIMARY KEY (podcast_id, filename)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_episodes_status ON episodes(podcast_id, status);
+		CREATE INDEX IF NOT EXISTS idx_episodes_session ON episodes(podcast_id, session);
+	`
+	_, err := s.db.Exec(schema)
+	return err
+}
+
+// Close releases all database resources.
+func (s *Store) Close() error {
+	if s.db == nil {
+		return nil
+	}
+	log.Printf("[INFO] SQLite store closing: %s", s.dsn)
+	err := s.db.Close()
+	s.db = nil
+	return err
+}
+
+// SaveEpisode persists an episode to the store.
+func (s *Store) SaveEpisode(podcastID string, episode *podcast.Episode) error {
+	if s.db == nil {
+		return storage.ErrClosed
+	}
+
+	query := `
+		INSERT INTO episodes (podcast_id, filename, pub_date, size, status, location, session, title, artist, album, year, comment, duration)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(podcast_id, filename) DO UPDATE SET
+			pub_date = excluded.pub_date,
+			size = excluded.size,
+			status = excluded.status,
+			location = excluded.location,
+			session = excluded.session,
+			title = excluded.title,
+			artist = excluded.artist,
+			album = excluded.album,
+			year = excluded.year,
+			comment = excluded.comment,
+			duration = excluded.duration
+	`
+
+	_, err := s.db.Exec(query,
+		podcastID,
+		episode.Filename,
+		episode.PubDate,
+		episode.Size,
+		episode.Status,
+		episode.Location,
+		episode.Session,
+		episode.Title,
+		episode.Artist,
+		episode.Album,
+		episode.Year,
+		episode.Comment,
+		episode.Duration,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save episode: %w", err)
+	}
+
+	return nil
+}
+
+// FindEpisodesByStatus retrieves all episodes with the given status.
+// Returns an empty slice if the podcast has no episodes yet.
+func (s *Store) FindEpisodesByStatus(podcastID string, status podcast.Status) ([]*podcast.Episode, error) {
+	if s.db == nil {
+		return nil, storage.ErrClosed
+	}
+
+	query := `
+		SELECT filename, pub_date, size, status, location, session, title, artist, album, year, comment, duration
+		FROM episodes
+		WHERE podcast_id = ? AND status = ?
+		ORDER BY filename
+	`
+
+	rows, err := s.db.Query(query, podcastID, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query episodes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return s.scanEpisodes(rows)
+}
+
+// FindEpisodesBySession retrieves all episodes for a given session.
+// Returns an empty slice if the podcast has no episodes yet.
+func (s *Store) FindEpisodesBySession(podcastID, session string) ([]*podcast.Episode, error) {
+	if s.db == nil {
+		return nil, storage.ErrClosed
+	}
+
+	query := `
+		SELECT filename, pub_date, size, status, location, session, title, artist, album, year, comment, duration
+		FROM episodes
+		WHERE podcast_id = ? AND session = ?
+		ORDER BY filename
+	`
+
+	rows, err := s.db.Query(query, podcastID, session)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query episodes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return s.scanEpisodes(rows)
+}
+
+// FindEpisodesBySizeLimit retrieves episodes up to a total size limit.
+// The limit is applied to the total podcast size (uploaded + new episodes).
+func (s *Store) FindEpisodesBySizeLimit(podcastID string, status podcast.Status, sizeLimit int64) ([]*podcast.Episode, error) {
+	if s.db == nil {
+		return nil, storage.ErrClosed
+	}
+
+	// First get episodes by status
+	episodes, err := s.FindEpisodesByStatus(podcastID, status)
+	if err != nil {
+		return nil, err
+	}
+
+	if sizeLimit <= 0 {
+		return episodes, nil
+	}
+
+	// Get total size of already uploaded episodes
+	uploadedSize, err := s.getUploadedSize(podcastID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply size limit considering already uploaded episodes
+	var result []*podcast.Episode
+	totalSize := uploadedSize
+	for _, ep := range episodes {
+		if totalSize >= sizeLimit || (totalSize+ep.Size) > sizeLimit {
+			break
+		}
+		totalSize += ep.Size
+		result = append(result, ep)
+	}
+
+	return result, nil
+}
+
+// getUploadedSize returns the total size of uploaded episodes for a podcast.
+func (s *Store) getUploadedSize(podcastID string) (int64, error) {
+	query := `SELECT COALESCE(SUM(size), 0) FROM episodes WHERE podcast_id = ? AND status = ?`
+	var totalSize int64
+	err := s.db.QueryRow(query, podcastID, podcast.Uploaded).Scan(&totalSize)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get uploaded size: %w", err)
+	}
+	return totalSize, nil
+}
+
+// GetEpisodeByFilename retrieves an episode by its filename.
+// Returns ErrNotFound if the episode doesn't exist (including when the podcast has no episodes yet).
+func (s *Store) GetEpisodeByFilename(podcastID, fileName string) (*podcast.Episode, error) {
+	if s.db == nil {
+		return nil, storage.ErrClosed
+	}
+
+	query := `
+		SELECT filename, pub_date, size, status, location, session, title, artist, album, year, comment, duration
+		FROM episodes
+		WHERE podcast_id = ? AND filename = ?
+	`
+
+	row := s.db.QueryRow(query, podcastID, fileName)
+	episode, err := s.scanEpisode(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, storage.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if episode.Filename == "" {
+		return nil, storage.ErrNotFound
+	}
+
+	return episode, nil
+}
+
+// GetLastEpisodeByNotStatus retrieves the last episode that doesn't have the given status.
+// Returns nil if no matching episode exists.
+func (s *Store) GetLastEpisodeByNotStatus(podcastID string, status podcast.Status) (*podcast.Episode, error) {
+	if s.db == nil {
+		return nil, storage.ErrClosed
+	}
+
+	query := `
+		SELECT filename, pub_date, size, status, location, session, title, artist, album, year, comment, duration
+		FROM episodes
+		WHERE podcast_id = ? AND status != ?
+		ORDER BY filename DESC
+		LIMIT 1
+	`
+
+	row := s.db.QueryRow(query, podcastID, status)
+	episode, err := s.scanEpisode(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return episode, nil
+}
+
+// ListPodcasts returns all podcast IDs in the store.
+func (s *Store) ListPodcasts() ([]string, error) {
+	if s.db == nil {
+		return nil, storage.ErrClosed
+	}
+
+	query := `SELECT DISTINCT podcast_id FROM episodes ORDER BY podcast_id`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list podcasts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var podcasts []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan podcast id: %w", err)
+		}
+		podcasts = append(podcasts, id)
+	}
+
+	return podcasts, rows.Err()
+}
+
+// ListEpisodes returns all episodes for a podcast.
+func (s *Store) ListEpisodes(podcastID string) ([]*podcast.Episode, error) {
+	if s.db == nil {
+		return nil, storage.ErrClosed
+	}
+
+	query := `
+		SELECT filename, pub_date, size, status, location, session, title, artist, album, year, comment, duration
+		FROM episodes
+		WHERE podcast_id = ?
+		ORDER BY filename
+	`
+
+	rows, err := s.db.Query(query, podcastID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query episodes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return s.scanEpisodes(rows)
+}
+
+// scanEpisode scans a single episode from a row.
+func (s *Store) scanEpisode(row *sql.Row) (*podcast.Episode, error) {
+	ep := &podcast.Episode{}
+	err := row.Scan(
+		&ep.Filename,
+		&ep.PubDate,
+		&ep.Size,
+		&ep.Status,
+		&ep.Location,
+		&ep.Session,
+		&ep.Title,
+		&ep.Artist,
+		&ep.Album,
+		&ep.Year,
+		&ep.Comment,
+		&ep.Duration,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return ep, nil
+}
+
+// scanEpisodes scans multiple episodes from rows.
+func (s *Store) scanEpisodes(rows *sql.Rows) ([]*podcast.Episode, error) {
+	var episodes []*podcast.Episode
+	for rows.Next() {
+		ep := &podcast.Episode{}
+		err := rows.Scan(
+			&ep.Filename,
+			&ep.PubDate,
+			&ep.Size,
+			&ep.Status,
+			&ep.Location,
+			&ep.Session,
+			&ep.Title,
+			&ep.Artist,
+			&ep.Album,
+			&ep.Year,
+			&ep.Comment,
+			&ep.Duration,
+		)
+		if err != nil {
+			log.Printf("[WARN] failed to scan episode: %v", err)
+			continue
+		}
+		episodes = append(episodes, ep)
+	}
+	return episodes, rows.Err()
+}
+
+// Verify Store implements storage.Store interface.
+var _ storage.Store = (*Store)(nil)

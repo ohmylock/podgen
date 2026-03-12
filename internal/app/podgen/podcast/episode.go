@@ -21,4 +21,10 @@ type Episode struct {
 	Status   Status
 	Location string
 	Session  string
+	Title    string
+	Artist   string
+	Album    string
+	Year     string
+	Comment  string
+	Duration string
 }

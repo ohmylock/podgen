@@ -3,9 +3,28 @@ package configs
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// StorageConfig defines database storage configuration
+type StorageConfig struct {
+	// Type specifies the storage backend: sqlite (default), bolt, or postgres
+	Type string `yaml:"type"`
+	// Path is the file path for sqlite/bolt databases
+	Path string `yaml:"path"`
+	// DSN is the connection string for postgres (overrides Path if set)
+	DSN string `yaml:"dsn"`
+}
+
+// ArtworkConfig defines artwork auto-generation configuration
+type ArtworkConfig struct {
+	// AutoGenerate enables automatic podcast cover art generation when no artwork exists.
+	// Nil/omitted defaults to true, explicit false disables it.
+	AutoGenerate *bool `yaml:"auto_generate"`
+}
 
 // Conf for config yaml
 type Conf struct {
@@ -22,10 +41,12 @@ type Conf struct {
 	Upload struct {
 		ChunkSize int `yaml:"chunk_size"`
 	} `yaml:"upload"`
-	DB      string `yaml:"db"`
+	DB      string `yaml:"db"` // Deprecated: use Database.Path instead
 	Storage struct {
 		Folder string `yaml:"folder"`
 	} `yaml:"storage"`
+	Database StorageConfig `yaml:"database"`
+	Artwork  ArtworkConfig `yaml:"artwork"`
 }
 
 // Podcast defines podcast section
@@ -55,4 +76,73 @@ func Load(fileName string) (res *Conf, err error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+// Save writes the configuration to a file
+func (c *Conf) Save(fileName string) error {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(fileName, data, 0o600)
+}
+
+// GetStorageType returns the configured storage type, defaulting to "sqlite"
+// For backward compatibility, legacy DB field always defaults to "bolt" since
+// the db: field historically only worked with Bolt backend
+func (c *Conf) GetStorageType() string {
+	if c.Database.Type != "" {
+		return c.Database.Type
+	}
+	// Legacy backward-compatibility: db: field was Bolt-only, so default to bolt
+	if c.DB != "" {
+		return "bolt"
+	}
+	return "sqlite"
+}
+
+// HasStorageTypePreference returns true if config has explicit type preference,
+// uses legacy db field, or explicitly sets database.path (indicating new config format).
+// When any of these are set, CLI should not infer type from path extension.
+func (c *Conf) HasStorageTypePreference() bool {
+	return c.Database.Type != "" || c.Database.Path != "" || c.DB != ""
+}
+
+// InferStorageTypeFromPath detects storage type from file extension.
+// Returns "bolt" for .bdb and .bolt files, "sqlite" otherwise.
+func InferStorageTypeFromPath(path string) string {
+	if strings.HasSuffix(path, ".bdb") || strings.HasSuffix(path, ".bolt") {
+		return "bolt"
+	}
+	return "sqlite"
+}
+
+// GetStorageDSN returns the database path/DSN with fallback to legacy DB field
+func (c *Conf) GetStorageDSN() string {
+	// DSN takes priority (for postgres)
+	if c.Database.DSN != "" {
+		return c.Database.DSN
+	}
+	// Then Path from new config
+	if c.Database.Path != "" {
+		return c.Database.Path
+	}
+	// Fall back to legacy DB field
+	if c.DB != "" {
+		return c.DB
+	}
+	// Default: podgen.db in storage folder
+	if c.Storage.Folder != "" {
+		return filepath.Join(c.Storage.Folder, "podgen.db")
+	}
+	return "podgen.db"
+}
+
+// IsArtworkAutoGenerateEnabled returns whether automatic artwork generation is enabled.
+// Defaults to true if not explicitly configured.
+func (c *Conf) IsArtworkAutoGenerateEnabled() bool {
+	if c.Artwork.AutoGenerate == nil {
+		return true
+	}
+	return *c.Artwork.AutoGenerate
 }
