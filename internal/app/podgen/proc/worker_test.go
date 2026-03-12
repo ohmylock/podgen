@@ -45,7 +45,7 @@ func TestRunWorkerPool_AllTasksProcessed(t *testing.T) {
 
 	results := proc.RunWorkerPool(context.Background(), 3, sendTasks(tasks), uploadFn)
 
-	var got []int
+	got := make([]int, 0, n)
 	for r := range results {
 		require.NoError(t, r.Err)
 		got = append(got, r.Index)

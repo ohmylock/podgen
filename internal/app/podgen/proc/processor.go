@@ -299,78 +299,64 @@ func (p *Processor) UploadNewEpisodes(ctx context.Context, session, podcastID, p
 		defer p.Progress.Finish()
 	}
 
-	var uploadErrs []error
-
-	// ensure valid chunk size to avoid division by zero
-	chunkSize := p.ChunkSize
-	if chunkSize <= 0 {
-		chunkSize = 1
+	workers := p.ChunkSize
+	if workers <= 0 {
+		workers = 1
 	}
 
-	// process in chunks - parallel S3 uploads, then sequential DB updates
-	for i := 0; i < len(episodes); i += chunkSize {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	// fill tasks channel upfront so workers can start immediately
+	tasks := make(chan UploadTask, len(episodes))
+	for i, ep := range episodes {
+		tasks <- UploadTask{Index: i, PodcastID: podcastID, Folder: podcastFolder, Episode: ep}
+	}
+	close(tasks)
 
-		end := i + chunkSize
-		if end > len(episodes) {
-			end = len(episodes)
+	// uploadFn uses stable workerID for progress reporting
+	uploadFn := func(ctx context.Context, workerID int, task UploadTask) UploadTaskResult {
+		if p.Progress != nil {
+			p.Progress.StartFile(workerID, task.Episode.Filename, task.Episode.Size)
 		}
-		chunk := episodes[i:end]
-
-		// parallel S3 uploads
-		uploadResults := make([]UploadedEpisode, len(chunk))
-		tasks := make([]func(ctx context.Context) error, len(chunk))
-		for j, episode := range chunk {
-			tasks[j] = func(ctx context.Context) error {
-				if p.Progress != nil {
-					p.Progress.StartFile(j, episode.Filename, episode.Size)
-				}
-				// Create progress callback for this worker
-				var progressFn ProgressFunc
-				if p.Progress != nil {
-					progressFn = func(uploaded, total int64) {
-						p.Progress.UpdateProgress(j, uploaded, total)
-					}
-				}
-				result, err := p.uploadSingleEpisode(ctx, podcastID, podcastFolder, episode, progressFn)
-				if p.Progress != nil {
-					p.Progress.CompleteFile(j, episode.Size, err)
-				}
-				if err != nil {
-					return err
-				}
-				uploadResults[j] = result
-				return nil
+		var progressFn ProgressFunc
+		if p.Progress != nil {
+			progressFn = func(uploaded, total int64) {
+				p.Progress.UpdateProgress(workerID, uploaded, total)
 			}
 		}
+		result, uploadErr := p.uploadSingleEpisode(ctx, task.PodcastID, task.Folder, task.Episode, progressFn)
+		if p.Progress != nil {
+			p.Progress.CompleteFile(workerID, task.Episode.Size, uploadErr)
+		}
+		return UploadTaskResult{
+			Index:    task.Index,
+			Episode:  task.Episode,
+			Location: result.Location,
+			Err:      uploadErr,
+		}
+	}
 
-		errs := RunParallel(ctx, chunkSize, tasks)
+	// results channel is closed when all workers finish
+	resultsCh := RunWorkerPool(ctx, workers, tasks, uploadFn)
 
-		// sequential DB updates for successful uploads
-		for j, err := range errs {
-			if err != nil {
-				log.Printf("[ERROR] can't upload episode %s, %v", chunk[j].Filename, err)
-				uploadErrs = append(uploadErrs, fmt.Errorf("upload %s: %w", chunk[j].Filename, err))
-				continue
-			}
-			uploaded := uploadResults[j]
-			episode, err := p.Storage.GetEpisodeByFilename(uploaded.PodcastID, uploaded.Filename)
-			if err != nil {
-				return fmt.Errorf("can't get episode by filename %s, %w", uploaded.Filename, err)
-			}
-			if episode == nil {
-				return fmt.Errorf("episode not found after upload: %s", uploaded.Filename)
-			}
-			episode.Session = session
-			episode.Status = podcast.Uploaded
-			episode.Location = uploaded.Location
-			if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
-				return fmt.Errorf("can't save episode %s, %w", episode.Filename, err)
-			}
+	// update DB immediately per result — no waiting for a full batch
+	var uploadErrs []error
+	for result := range resultsCh {
+		if result.Err != nil {
+			log.Printf("[ERROR] can't upload episode %s, %v", result.Episode.Filename, result.Err)
+			uploadErrs = append(uploadErrs, fmt.Errorf("upload %s: %w", result.Episode.Filename, result.Err))
+			continue
+		}
+		episode, err := p.Storage.GetEpisodeByFilename(podcastID, result.Episode.Filename)
+		if err != nil {
+			return fmt.Errorf("can't get episode by filename %s, %w", result.Episode.Filename, err)
+		}
+		if episode == nil {
+			return fmt.Errorf("episode not found after upload: %s", result.Episode.Filename)
+		}
+		episode.Session = session
+		episode.Status = podcast.Uploaded
+		episode.Location = result.Location
+		if err = p.Storage.SaveEpisode(podcastID, episode); err != nil {
+			return fmt.Errorf("can't save episode %s, %w", episode.Filename, err)
 		}
 	}
 	return errors.Join(uploadErrs...)
