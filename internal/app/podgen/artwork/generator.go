@@ -16,14 +16,20 @@ const (
 	textMaxWidth = 2400.0
 )
 
-// systemFontPaths lists common TTF font paths on macOS and Linux.
+// systemFontPaths lists common TTF font paths on macOS, Linux, and Windows.
 var systemFontPaths = []string{
+	// macOS
 	"/Library/Fonts/Arial.ttf",
 	"/System/Library/Fonts/Supplemental/Arial.ttf",
+	// Linux
 	"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 	"/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 	"/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
 	"/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+	// Windows
+	"C:\\Windows\\Fonts\\arial.ttf",
+	"C:\\Windows\\Fonts\\Arial.ttf",
+	"C:\\Windows\\Fonts\\segoeui.ttf",
 }
 
 // Generate creates a 3000x3000 PNG artwork image with a vertical gradient background
@@ -41,8 +47,10 @@ func Generate(seed, title, outputPath string) error {
 	dc.DrawRectangle(0, 0, imageSize, imageSize)
 	dc.Fill()
 
-	// Try to load a system font; fall back to built-in if none found
-	loadFont(dc, fontSize)
+	// Try to load a system font; error if none found (gg has no built-in font)
+	if !loadFont(dc, fontSize) {
+		return fmt.Errorf("artwork: no system font found for text rendering")
+	}
 
 	// Draw text shadow
 	dc.SetColor(color.RGBA{R: 0, G: 0, B: 0, A: 160})
@@ -79,7 +87,7 @@ func loadFont(dc *gg.Context, points float64) bool {
 
 // colorsFromSeed generates two visually pleasing gradient colors from a seed string.
 // Colors are derived deterministically via SHA-256 using HSL color space.
-func colorsFromSeed(seed string) (color.Color, color.Color) {
+func colorsFromSeed(seed string) (top, bottom color.Color) {
 	h := sha256.Sum256([]byte(seed))
 
 	// Map first hash byte to a hue (0–359°), use split-complementary for second

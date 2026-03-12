@@ -259,12 +259,13 @@ func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFo
 		podcastImagePath = fmt.Sprintf("%s/%s", p.StoragePath, podcastImageFilename)
 	}
 
+	var generatedPath string
 	if !CheckFileExists(podcastImagePath) {
 		if !autoGenerate {
 			return "", errors.New("podcast image not found")
 		}
 
-		generatedPath := fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, generatedImageFilename)
+		generatedPath = fmt.Sprintf("%s/%s/%s", p.StoragePath, podcastFolder, generatedImageFilename)
 		log.Printf("[INFO] Generating artwork for %s at %s", podcastID, generatedPath)
 		if err := artwork.Generate(podcastID, podcastTitle, generatedPath); err != nil {
 			return "", fmt.Errorf("artwork generation for %s: %w", podcastID, err)
@@ -278,6 +279,10 @@ func (p *Processor) UploadPodcastImage(ctx context.Context, podcastID, podcastFo
 		podcastImagePath)
 
 	if err != nil {
+		// Clean up generated file on upload failure
+		if generatedPath != "" {
+			_ = os.Remove(generatedPath)
+		}
 		return "", fmt.Errorf("[ERROR] can't upload image %s, %v", podcastImageFilename, err)
 	}
 
@@ -291,8 +296,12 @@ func (p *Processor) GetPodcastImage(ctx context.Context, podcastFolder, podcastI
 	imageInfo, err := p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, podcastImageFilename))
 
 	if err != nil {
-		log.Printf("[ERROR] can't image info %s, %v", podcastImageFilename, err)
-		return ""
+		// Try generated artwork as fallback
+		imageInfo, err = p.S3Client.GetObjectInfo(ctx, fmt.Sprintf("%s/%s", podcastFolder, generatedImageFilename))
+		if err != nil {
+			log.Printf("[ERROR] can't get image info %s, %v", podcastImageFilename, err)
+			return ""
+		}
 	}
 	return imageInfo.Location
 }

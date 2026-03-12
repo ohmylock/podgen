@@ -6,6 +6,7 @@ Podcast Generator is simple application for upload some episodes to s3 storage a
 
 - Upload MP3 episodes to S3-compatible cloud storage
 - Generate RSS/Atom feeds compatible with podcast players
+- Automatic artwork generation - creates 3000x3000 gradient cover art when no podcast image exists
 - MP3 metadata extraction - reads ID3 tags (title, artist, album, year, comment, duration) to enrich RSS feed descriptions
 - Progress display - visual progress bar during uploads and deletions when running in terminal
 - Rollback support - undo last upload or specific session
@@ -67,6 +68,9 @@ storage:
 
 upload:
   chunk_size: 3 # How many episodes uploaded on stream
+
+artwork:
+  auto_generate: true # Optional. Generate cover art if no image exists (default: true)
 
 cloud_storage:
   endpoint_url: "s3.aws.com" # S3 storage endpoint url
@@ -181,3 +185,21 @@ Uploading: episode-2024-01-15.mp3  [████████████░░�
 ```
 
 Progress display is automatically disabled when output is piped or redirected.
+
+## Automatic Artwork Generation
+
+When no podcast cover image (`podcast.png`, `podcast.jpg`) exists in a podcast folder, podgen can automatically generate one. The generated artwork:
+
+- Creates a 3000x3000 pixel PNG (meets Apple/Spotify requirements)
+- Uses a gradient background with colors derived from the podcast name
+- Centers the podcast title with readable text
+- Saves as `podcast.generated.png` in the podcast folder
+
+Artwork generation is enabled by default. To disable:
+
+```yaml
+artwork:
+  auto_generate: false
+```
+
+If disabled and no image exists, the `-i` (image upload) flag will fail with an error.
