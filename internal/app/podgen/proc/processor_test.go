@@ -1293,6 +1293,7 @@ func TestProcessor_UploadPodcastImage(t *testing.T) {
 				tt.podcastFolder,
 				tt.imageFile,
 				tt.autoGenerate,
+				false, // forceRegenerate
 				tt.podcastTitle,
 			)
 
@@ -1310,7 +1311,7 @@ func TestProcessor_UploadPodcastImage(t *testing.T) {
 
 			// If image was generated, verify it was created
 			if !tt.imageExists && tt.autoGenerate {
-				generatedPath := filepath.Join(dir, tt.podcastFolder, "podcast.generated.png")
+				generatedPath := filepath.Join(dir, tt.podcastFolder, "podcast.png")
 				_, statErr := os.Stat(generatedPath)
 				require.NoError(t, statErr, "generated image should exist")
 
@@ -1360,13 +1361,14 @@ func TestProcessor_UploadPodcastImage_GeneratedImageDeterministic(t *testing.T) 
 		podcastFolder,
 		"podcast.png",
 		true,
+		false, // forceRegenerate
 		podcastTitle,
 	)
 	require.NoError(t, err1)
 	assert.NotEmpty(t, location1)
 
 	// Read generated image
-	generatedPath1 := filepath.Join(dir, podcastFolder, "podcast.generated.png")
+	generatedPath1 := filepath.Join(dir, podcastFolder, "podcast.png")
 	data1, readErr1 := os.ReadFile(generatedPath1) //nolint:gosec // test file path from t.TempDir()
 	require.NoError(t, readErr1)
 
@@ -1381,6 +1383,7 @@ func TestProcessor_UploadPodcastImage_GeneratedImageDeterministic(t *testing.T) 
 		podcastFolder,
 		"podcast.png",
 		true,
+		false, // forceRegenerate
 		podcastTitle,
 	)
 	require.NoError(t, err2)

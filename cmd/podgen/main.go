@@ -14,6 +14,7 @@ import (
 
 	"github.com/jessevdk/go-flags"
 	"podgen/internal/app/podgen"
+	"podgen/internal/app/podgen/artwork"
 	"podgen/internal/app/podgen/proc"
 	"podgen/internal/configs"
 	"podgen/internal/pkg/progress"
@@ -35,8 +36,10 @@ var opts struct {
 	ShowRSS           bool   `long:"rss" description:"Show RSS feed URL for podcasts"`
 	MigrateFrom       string `long:"migrate-from" description:"Migrate data from another database (format: type:path, e.g., bolt:/path/to/db)"`
 	AddPodcast        string `long:"add-podcast" description:"Add new podcast from folder name"`
+	AddPodcastAlias   string `long:"add" description:"Alias for --add-podcast"`
 	PodcastTitle      string `long:"title" description:"Title for new podcast (used with --add-podcast)"`
 	ForceDelete       bool   `long:"clear" description:"Force delete old episodes before upload (ignores delete_old_episodes setting)"`
+	GenerateArtwork   bool   `short:"g" long:"generate-artwork" description:"Force (re)generate podcast artwork"`
 	// Dbg bool `long:"dbg" env:"DEBUG" description:"show debug info"`
 }
 
@@ -56,6 +59,11 @@ func main() {
 
 	if !parseFlags() {
 		return
+	}
+
+	// Merge --add alias into AddPodcast
+	if opts.AddPodcastAlias != "" && opts.AddPodcast == "" {
+		opts.AddPodcast = opts.AddPodcastAlias
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -340,6 +348,16 @@ func runAddPodcast() error {
 		title = string(runes)
 	}
 
+	// Generate artwork if no podcast image exists
+	podcastImagePath := filepath.Join(folderPath, "podcast.png")
+	if !proc.CheckFileExists(podcastImagePath) {
+		log.Printf("[INFO] Generating artwork for %s", podcastID)
+		if err := artwork.Generate(podcastID, title, podcastImagePath); err != nil {
+			return fmt.Errorf("can't generate artwork: %w", err)
+		}
+		log.Printf("[INFO] Artwork generated at %s", podcastImagePath)
+	}
+
 	// Initialize podcasts map if nil
 	if conf.Podcasts == nil {
 		conf.Podcasts = make(map[string]configs.Podcast)
@@ -388,8 +406,8 @@ func runOperations(ctx context.Context, app *podgen.App, podcasts string) int {
 	}
 
 	var images map[string]string
-	if opts.UpdateImage {
-		images = app.UploadPodcastImage(ctx, podcasts)
+	if opts.UpdateImage || opts.GenerateArtwork {
+		images = app.UploadPodcastImage(ctx, podcasts, opts.GenerateArtwork)
 	}
 
 	if opts.Rollback {

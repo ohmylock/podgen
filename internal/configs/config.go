@@ -4,6 +4,7 @@ package configs
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -110,10 +111,7 @@ func (c *Conf) HasStorageTypePreference() bool {
 // InferStorageTypeFromPath detects storage type from file extension.
 // Returns "bolt" for .bdb and .bolt files, "sqlite" otherwise.
 func InferStorageTypeFromPath(path string) string {
-	if len(path) > 4 && path[len(path)-4:] == ".bdb" {
-		return "bolt"
-	}
-	if len(path) > 5 && path[len(path)-5:] == ".bolt" {
+	if strings.HasSuffix(path, ".bdb") || strings.HasSuffix(path, ".bolt") {
 		return "bolt"
 	}
 	return "sqlite"

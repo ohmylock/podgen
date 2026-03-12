@@ -30,6 +30,11 @@ Application options:
       --rollback-session= Rollback by session name
       --rss               Show RSS feed URL for podcasts
       --migrate-from=     Migrate data from another database (format: type:path)
+      --add-podcast=      Add new podcast from folder name
+      --add=              Alias for --add-podcast
+      --title=            Title for new podcast (used with --add-podcast)
+      --clear             Force delete old episodes before upload
+  -g, --generate-artwork  Force (re)generate podcast artwork
 
 Help Options:
   -h, --help              Show this help message
@@ -193,7 +198,7 @@ When no podcast cover image (`podcast.png`) exists in a podcast folder, podgen c
 - Creates a 3000x3000 pixel PNG (meets Apple/Spotify requirements)
 - Uses a gradient background with colors derived from the podcast name
 - Centers the podcast title with readable text
-- Saves as `podcast.generated.png` in the podcast folder
+- Saves as `podcast.png` in the podcast folder
 
 Artwork generation is enabled by default. To disable:
 
@@ -203,3 +208,25 @@ artwork:
 ```
 
 If disabled and no image exists, the `-i` (image upload) flag will fail with an error.
+
+To force regenerate artwork (even if an image already exists):
+
+```bash
+podgen -g -p mypodcast
+```
+
+## Adding Podcasts
+
+To add a new podcast from an existing folder:
+
+```bash
+# With explicit title
+podgen --add myfolder --title "My Podcast Title"
+
+# Without title (folder name with capitalized first letter)
+podgen --add myfolder
+```
+
+The folder must exist in the storage path. The podcast will be added to your config file.
+
+If no `podcast.png` exists in the folder, artwork will be automatically generated.

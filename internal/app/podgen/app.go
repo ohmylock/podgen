@@ -144,13 +144,14 @@ func (a *App) GenerateFeed(ctx context.Context, podcastIDs string, podcastImages
 	return errors.Join(errs...)
 }
 
-// UploadPodcastImage by podcast to s3 storage
-func (a *App) UploadPodcastImage(ctx context.Context, podcastIDs string) map[string]string {
+// UploadPodcastImage by podcast to s3 storage.
+// If forceRegenerate is true, artwork is regenerated even if an image already exists.
+func (a *App) UploadPodcastImage(ctx context.Context, podcastIDs string, forceRegenerate bool) map[string]string {
 	podcasts := a.filterPodcastsByPodcastIDs(podcastIDs)
 
 	result := make(map[string]string, len(podcasts))
 	for i, p := range podcasts {
-		imageURL, err := a.processor.UploadPodcastImage(ctx, i, p.Folder, podcastDefaultImage, a.config.IsArtworkAutoGenerateEnabled(), p.Title)
+		imageURL, err := a.processor.UploadPodcastImage(ctx, i, p.Folder, podcastDefaultImage, a.config.IsArtworkAutoGenerateEnabled(), forceRegenerate, p.Title)
 		if err != nil {
 			log.Printf("[ERROR] can't upload podcast image %s, %v", podcastDefaultImage, err)
 			continue
